@@ -245,6 +245,23 @@ bool frame_dump_due(uint64_t presents) {
         }
     }
     if (left && presents % every == 0) return left--, true;
+    // NX_DUMP_EVERY_S=<seconds> (study fps-unlock-1710): a dump every <seconds> of wall time since the first present, so
+    // runs at different frame rates are compared at equal wall times. The wall time is logged with the present number.
+    static const double every_s = std::getenv("NX_DUMP_EVERY_S") ? std::atof(std::getenv("NX_DUMP_EVERY_S")) : 0.0;
+    if (every_s > 0) {
+        static uint64_t t0 = 0, next_ns = 0, last_presents = ~0ull;
+        static bool last_due = false;
+        if (presents == last_presents) return last_due;
+        last_presents = presents;
+        uint64_t now = plat::monotonic_ns();
+        if (!t0) t0 = now, next_ns = now + uint64_t(every_s * 1e9);
+        last_due = now >= next_ns;
+        if (last_due) {
+            next_ns += uint64_t(every_s * 1e9);
+            log("dump_frames: present %llu at %.2f s wall", (unsigned long long)presents, double(now - t0) / 1e9);
+        }
+        return last_due;
+    }
     return frame_dump_every() && presents % frame_dump_every() == 0;
 }
 
