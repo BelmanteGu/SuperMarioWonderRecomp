@@ -134,15 +134,28 @@ final class Props {
                 a("Default (0.2)", "Maximum (0)", "High (0.5)", "Medium (1)", "Soft (1.5)", "No sharpening (2)"),
                 a("Padrão (0,2)", "Máxima (0)", "Alta (0,5)", "Média (1)", "Suave (1,5)", "Sem nitidez (2)"),
                 "runtime/src/nvn/nvn_present.cpp getenv(NX_FSR_SHARP)").restart().requires("fsr"));
+        // NX_ULTRAWIDE=1 (study ultrawide-1710): render targets widened to the screen's shape and the cameras' aspect
+        // patched, so a 19.5:9 / 20:9 phone shows more of the level instead of side bars. Off = the game's 16:9.
+        l.add(choice("ultrawide", T_IMAGE, Store.CONFIG, "NX_ULTRAWIDE", null, a(null, "1"),
+                a("Off (16:9, side bars)", "Fill the screen (wider view)"),
+                a("Desligado (16:9, faixas nas laterais)", "Preencher a tela (visão mais larga)"),
+                "runtime/src/nvn/nvn_ultrawide.cpp getenv(NX_ULTRAWIDE)").restart().experimental());
         // ---- performance
         // NX_FPS_CAP=30 holds the game's own 30 fps mode (nvn_queue.cpp frame_time_probe); no line = the game's own rule.
         l.add(choice("fps_cap", T_PERF, Store.CONFIG, "NX_FPS_CAP", null, a(null, "30"),
                 a("60 (game's own: 60, 30 when heavy)", "30 (always, steady)"),
                 a("60 (do jogo: 60, 30 quando pesado)", "30 (sempre, estável)"),
                 "runtime/src/nvn/nvn_queue.cpp getenv(NX_FPS_CAP)").restart());
-        l.add(choice("pipelined", T_PERF, Store.CONFIG, "NX_PIPELINED", null, a(null, "2", "3", "4"),
-                a("Synchronous (default)", "2 in flight", "3 in flight", "4 in flight"),
-                a("Síncrono (padrão)", "2 em voo", "3 em voo", "4 em voo"),
+        // NX_DISPLAY_HZ (study fps-unlock-1710): the vsync the game paces itself on. The game's logic steps once per
+        // frame, so above 60 it also runs faster: an experiment, not a smooth 120.
+        l.add(choice("display_hz", T_PERF, Store.CONFIG, "NX_DISPLAY_HZ", null, a(null, "90", "120"),
+                a("60 Hz (normal)", "90 Hz (game runs 1.5x fast)", "120 Hz (game runs 2x fast)"),
+                a("60 Hz (normal)", "90 Hz (jogo 1,5x mais rápido)", "120 Hz (jogo 2x mais rápido)"),
+                "runtime/src/hle_vi.cpp getenv(NX_DISPLAY_HZ)").restart().experimental());
+        // No line: pipelined on integrated GPUs (every phone), study intel-igpu-1710; "0" forces synchronous.
+        l.add(choice("pipelined", T_PERF, Store.CONFIG, "NX_PIPELINED", null, a(null, "0", "2", "3", "4"),
+                a("Automatic (pipelined on phones)", "Synchronous (safe)", "2 in flight", "3 in flight", "4 in flight"),
+                a("Automático (em pipeline no celular)", "Síncrono (seguro)", "2 em voo", "3 em voo", "4 em voo"),
                 "runtime/src/nvn/nvn_frames.cpp getenv(NX_PIPELINED)").restart().experimental());
         l.add(toggle("gpu_turbo", T_PERF, Store.CONFIG, "NX_GPU_TURBO", "0", OFF_ON, "runtime/src/perf_hint.cpp getenv(NX_GPU_TURBO)").restart());
         l.add(choice("mem_limit", T_PERF, Store.CONFIG, "NX_MEM_LIMIT_GB", null, a(null, "3", "3.5", "4", "5", "6"),
@@ -158,6 +171,10 @@ final class Props {
                 "runtime/src/nvn/nvn_frames.cpp getenv(NX_SUBMIT_CHUNK_DRAWS)").restart().advanced());
         l.add(toggle("pipeline_cache", T_PERF, Store.CONFIG, "NX_PIPELINE_CACHE", null, a("0", null),
                 "runtime/src/nvn/nvn_pipeline_cache.cpp getenv(NX_PIPELINE_CACHE)").restart().advanced());
+        // NX_PAD_BUFFERS=1: the zero padding after bound buffers again (study intel-igpu-1710 dropped it where the GPU
+        // bound-checks); the safe choice if HUD text or skinned characters glitch (DEBUG.md #21).
+        l.add(toggle("pad_buffers", T_PERF, Store.CONFIG, "NX_PAD_BUFFERS", null, a(null, "1"),
+                "runtime/src/nvn/nvn_sets.cpp getenv(NX_PAD_BUFFERS)").restart().advanced());
         // ---- controls (the runtime draws the buttons: touch_layout.cpp, platform_android_input.cpp)
         l.add(toggle("touch_show", T_CONTROLS, Store.CONFIG, "NX_TOUCH_SHOW", null, a("0", null),
                 "runtime/src/platform_android_input.cpp getenv(NX_TOUCH_SHOW)").restart());

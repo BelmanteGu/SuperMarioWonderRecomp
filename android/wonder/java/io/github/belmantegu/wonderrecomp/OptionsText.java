@@ -43,12 +43,21 @@ final class OptionsText {
                 "Ampliação AMD FidelityFX: renderiza menos pixels e reconstrói a imagem.");
         t("fsr_sharpness", "FSR sharpness", "Nitidez do FSR", "How much RCAS sharpens the picture after scaling.",
                 "Quanto o RCAS afia a imagem depois da ampliação.");
+        t("ultrawide", "Widescreen", "Widescreen",
+                "Fill the screen: the game draws a wider view of the level to the phone's own shape instead of 16:9 with bars. The HUD stays a centred 16:9 area. A little heavier (more pixels).",
+                "Preencher a tela: o jogo desenha uma visão mais larga da fase no formato do celular em vez de 16:9 com faixas. O HUD fica numa área 16:9 centralizada. Um pouco mais pesado (mais pixels).");
+        t("display_hz", "Screen rate", "Frequência da tela",
+                "The rate the game paces itself on. The game advances one step per frame, so 90/120 Hz make the whole game run faster (music out of sync): an experiment, not a smoother 60.",
+                "A frequência pela qual o jogo se guia. O jogo avança um passo por quadro, então 90/120 Hz deixam o jogo inteiro mais rápido (música fora de sincronia): um experimento, não um 60 mais fluido.");
+        t("pad_buffers", "Buffer padding", "Preenchimento de buffers",
+                "Off (default): faster, the GPU checks the bounds itself. On: the old zero padding, if HUD text or characters glitch.",
+                "Desligado (padrão): mais rápido, a GPU confere os limites sozinha. Ligado: o preenchimento antigo, se o texto do HUD ou os personagens falharem.");
         t("fps_cap", "FPS limit", "Limite de FPS",
                 "60: the game's own rule (60 fps when the phone keeps up, its own 30 fps mode when heavy). 30: always the 30 fps mode at the right game speed; a steady 33 ms frame, cooler and lighter on battery.",
                 "60: a regra do próprio jogo (60 fps quando o aparelho aguenta, o modo de 30 fps dele quando pesado). 30: sempre o modo de 30 fps na velocidade certa; quadro estável de 33 ms, mais frio e gasta menos bateria.");
         t("pipelined", "GPU submits in flight", "Envios de GPU em voo",
-                "Pipelined fences: how many submits stay in flight. Synchronous is the safe default; pipelined is faster but showed exploded meshes in some courses (DEBUG-2 #76).",
-                "Fences em pipeline: quantos envios ficam em voo. Síncrono é o padrão seguro; em pipeline é mais rápido, mas mostrou malhas explodidas em algumas fases (DEBUG-2 #76).");
+                "Pipelined fences: how many submits stay in flight. Automatic pipelines on integrated GPUs (phones): faster (the fountain scene went from 24 to 60 fps on a Galaxy S23). If meshes look exploded in a course (DEBUG-2 #76), choose Synchronous.",
+                "Fences em pipeline: quantos envios ficam em voo. Automático usa pipeline em GPUs integradas (celulares): mais rápido (a cena da fonte foi de 24 para 60 fps num Galaxy S23). Se as malhas aparecerem explodidas em alguma fase (DEBUG-2 #76), escolha Síncrono.");
         t("gpu_turbo", "GPU turbo", "GPU turbo", "Turns off the KGSL power control: Adreno at its top clock. Runs hotter.",
                 "Desliga o controle de energia KGSL: Adreno no clock máximo. Esquenta mais.");
         t("mem_limit", "Memory limit", "Limite de memória",
