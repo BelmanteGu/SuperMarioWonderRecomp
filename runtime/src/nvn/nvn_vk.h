@@ -38,6 +38,8 @@ VkDevice vk_device();
 bool vk_depth_clip_control();
 // The core features the device was created with (all the GPU has): depthClamp, depthBiasClamp, depthBounds, ...
 const VkPhysicalDeviceFeatures& vk_features();
+bool gpu_require_subgroup32();  // compute pipelines pin the subgroup size to 32 (nvn_pipeline.cpp)
+bool gpu_is_integrated();  // the device in use is an integrated GPU (set when the device is made)
 VkPhysicalDevice vk_physical();
 // nvn_gpu_pick.cpp: logs every device and returns the one NX_GPU asks for (default: the first discrete GPU).
 VkPhysicalDevice pick_physical_device(const std::vector<VkPhysicalDevice>& devices);
@@ -235,6 +237,7 @@ void zero_draws_collect();
 void zero_draws_log();
 void frame_sig_flush(uint64_t presents);  // NX_FRAME_SIG=1: the frame's draw signature, logged (nvn_draw_trace.cpp)
 void debug_snapshot(VkCommandBuffer cb, GpuImage& img, uint64_t draw);
+extern uint32_t g_snap_layer, g_snap_level;  // the layer and level debug_snapshot reads (default 0)
 void debug_snapshots_write();  // nvn_pipeline.cpp: before an image is freed
 
 // nvn_debug.cpp: GPU time per render pass (NX_GPU_PROFILE=1).

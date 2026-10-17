@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>
+#include <cstdio>
 #include <map>
 #include <set>
 #include <string>
@@ -77,6 +79,24 @@ VkShaderModule module_of(const ShaderInfo* s, const uint8_t* kinds = nullptr, ui
         const uint8_t* int_kinds = k != std::string(16, '\0') ? reinterpret_cast<const uint8_t*>(k.data()) : nullptr;
         std::vector<uint32_t> code = patched_spirv(s, int_kinds, unwritten, &is_patched);
         if (s->stage == ShaderStage::Vertex) clip_z_module(s, code);  // NX_CLIP_Z_PATCH (nvn_spirv_clip.cpp)
+        if (const char* opt = std::getenv("NX_SPIRV_OPT"); opt || std::getenv("NX_SPIRV_TOOL")) {  // diagnostic: each module through `spirv-opt <flags>` (NX_SPIRV_OPT) or `<tool> in out` (NX_SPIRV_TOOL) first
+            static int n = 0;
+            std::string in = "/tmp/nx_spv_" + std::to_string(getpid()) + "_" + std::to_string(n++) + ".spv", out = in + ".out";
+            if (FILE* f = std::fopen(in.c_str(), "wb")) {
+                std::fwrite(code.data(), 4, code.size(), f);
+                std::fclose(f);
+                std::string cmd = std::getenv("NX_SPIRV_TOOL") ? std::string(std::getenv("NX_SPIRV_TOOL")) + " " + in + " " + out + " " + s->hash
+                                                                : std::string("spirv-opt ") + opt + " " + in + " -o " + out + " 2>/dev/null";
+                if (std::system(cmd.c_str()) == 0)
+                    if (FILE* g = std::fopen(out.c_str(), "rb")) {
+                        std::vector<uint32_t> o(1 << 20);
+                        size_t words = std::fread(o.data(), 4, o.size(), g);
+                        std::fclose(g);
+                        if (words > 5) o.resize(words), code.swap(o);
+                    }
+                std::remove(in.c_str()), std::remove(out.c_str());
+            }
+        }
         VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
         ci.codeSize = code.size() * 4;
         ci.pCode = code.data();
@@ -363,8 +383,12 @@ VkPipeline graphics_pipeline(const PipelineKey& key, const ProgramLayout& layout
     // EQUAL after a depth pre-pass (the colour pass does not write depth) needs both passes to compute bit-identical
     // depth; two translated shaders compiled separately by Metal do not, and Wonder's whole course colour pass was
     // discarded (only the sky showed). LESS_OR_EQUAL keeps what EQUAL keeps for opaque geometry after a pre-pass.
-    if (key.depth.depth_func == 3 && !key.depth.depth_write) ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    ds.stencilTestEnable = has_depth && key.depth.stencil_test;
+    if (key.depth.depth_func == 3 && !key.depth.depth_write) {
+        ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        static const bool always = std::getenv("NX_EQUAL_ALWAYS") != nullptr;  // diagnostic: EQUAL passes test nothing
+        if (always) ds.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+    }
+    ds.stencilTestEnable = has_depth && key.depth.stencil_test && !std::getenv("NX_NO_STENCIL");
     VkStencilOpState* faces[2] = {&ds.front, &ds.back};
     for (int f = 0; f < 2; f++) {
         faces[f]->failOp = vk_stencil_op(key.depth.stencil_fail[f]);
@@ -611,6 +635,9 @@ VkPipeline compute_pipeline(const ShaderInfo* cs, const ProgramLayout& layout) {
         ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
         ci.stage.module = module_of(cs);
         ci.stage.pName = "main";
+        VkPipelineShaderStageRequiredSubgroupSizeCreateInfo sg{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO};
+        sg.requiredSubgroupSize = 32;
+        if (gpu_require_subgroup32()) ci.stage.pNext = &sg;
         ci.layout = layout.layout;
         if (p_vkCreateComputePipelines(vk_device(), pipeline_cache(), 1, &ci, nullptr, &p) != VK_SUCCESS) {
             log("nvn/vk: compute pipeline for %s failed", cs->hash.c_str());
