@@ -39,6 +39,12 @@ README.
 | `NX_SNAP_FS_BEFORE=<hash>[@<draw>]` | snapshot of colour target 0 *before* such a draw (what a feedback pass like a tonemap reads) | nvn_draw.cpp |
 | `NX_TRACE_VS_BLOCKS=1` | with the draw trace: the vertex stage's uniform blocks (camera block rows, c4..c6) | nvn_draw.cpp |
 | `NX_TRACE_UPLOADS=1` | uploads of big textures, with how much of their memory is non-zero | nvn_pipeline.cpp |
+| `NX_ULTRAWIDE=1\|<w>x<h>\|<a>:<b>` | ultrawide: widens the 16:9 render targets, viewports, scissors, clears and the window crop to the display's aspect (`1`: the window's, else the given one; 16:9 and narrower: off), patches the cameras' aspect (heap scan) and squeezes the UI back to 16:9. Off (unset) costs nothing. docs/nvn/studies/ultrawide-1710.md | nvn_ultrawide.cpp, nvn_draw.cpp |
+| `NX_UW_CAMERA=0` | with `NX_ULTRAWIDE`: no camera patch, every geometry draw squeezed (the world shrinks to the centre: for comparison) | nvn_ultrawide.cpp, nvn_draw.cpp |
+| `NX_UW_UI=learn` | with `NX_ULTRAWIDE`: squeeze only the vertex shaders seen drawing into BGRA8 UI layer targets, not every draw without depth test | nvn_draw.cpp |
+| `NX_UW_NOSCALE=<hash>,..` / `NX_UW_SCALE=<hash>,..` | with `NX_ULTRAWIDE`: vertex shaders never / only these are squeezed | nvn_ultrawide.cpp |
+| `NX_UW_TRACE=<first>:<count>` | with `NX_ULTRAWIDE`: one `uwdraw` line per draw (shaders, count, target, depth/blend, viewport, whether squeezed) | nvn_draw.cpp |
+| `NX_UW_SCAN=<present>` | once: where guest memory holds 16/9, 9/16, 1920x1080, 1280x720 (heap and main's data), with context (`uwscan` lines) | nvn_ultrawide.cpp |
 
 Always on: every 60 presents `nvn/vk: per frame over 60: submits, replay ms (host), GPU wait ms, present wait ms,
 upload MB`.

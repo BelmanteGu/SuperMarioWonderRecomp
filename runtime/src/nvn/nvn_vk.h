@@ -32,6 +32,7 @@ struct GpuImage {
     // without swizzle. MoltenVK returned alpha 0 for that view swizzle on a 2D-array view, so all text was invisible.
     bool alpha_from_r = false;
     uint32_t nvn_format = 0;  // the texture's NVN format
+    bool uw = false;          // NX_ULTRAWIDE: a widened render target (nvn_ultrawide.cpp)
 };
 
 VkDevice vk_device();

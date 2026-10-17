@@ -10,6 +10,7 @@
 #include <unordered_map>
 
 #include "nvn_pipeline.h"
+#include "nvn_ultrawide.h"
 #include "platform.h"
 
 namespace nx::nvn {
@@ -76,6 +77,11 @@ VkShaderModule module_of(const ShaderInfo* s, const uint8_t* kinds = nullptr, ui
         bool is_patched = false;
         const uint8_t* int_kinds = k != std::string(16, '\0') ? reinterpret_cast<const uint8_t*>(k.data()) : nullptr;
         std::vector<uint32_t> code = patched_spirv(s, int_kinds, unwritten, &is_patched);
+        if (s->stage == ShaderStage::Vertex && uw_on()) {  // NX_ULTRAWIDE: gl_Position.x * spec constant 0
+            std::vector<uint32_t> scaled;
+            if (patch_x_scale(code, scaled)) code.swap(scaled);
+            else log("nvn/vk: shader %s: ultrawide x scale not patched", s->hash.c_str());
+        }
         if (s->stage == ShaderStage::Vertex) clip_z_module(s, code);  // NX_CLIP_Z_PATCH (nvn_spirv_clip.cpp)
         VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
         ci.codeSize = code.size() * 4;
@@ -262,6 +268,8 @@ VkPipeline graphics_pipeline(const PipelineKey& key, const ProgramLayout& layout
     if (auto it = cache.find(k); it != cache.end()) return (last = &*it)->second;
 
     VkPipelineShaderStageCreateInfo stages[2]{};
+    VkSpecializationInfo spec_info{};
+    float uw_x_value = 1.0f;
     uint32_t nstages = 0;
     uint8_t int_kinds[16] = {};
     for (uint32_t a = 0; a < key.attrib_count && a < 16; a++) int_kinds[a] = uint8_t(vertex_int_kind(key.attribs[a].format));
@@ -288,6 +296,12 @@ VkPipeline graphics_pipeline(const PipelineKey& key, const ProgramLayout& layout
         st.stage = VkShaderStageFlagBits(stage_bit(s->stage));
         st.module = module_of(s, s == key.vs ? int_kinds : nullptr, s == key.fs ? unwritten : 0);
         st.pName = "main";
+        if (s == key.vs && key.uw_x > 0) {  // NX_ULTRAWIDE: constant 0 of the patched vertex module
+            static VkSpecializationMapEntry entry{0, 0, sizeof(float)};
+            spec_info = {1, &entry, sizeof(float), &uw_x_value};
+            uw_x_value = key.uw_x;
+            st.pSpecializationInfo = &spec_info;
+        }
     }
 
     // Vertex input: each shader input location reads the attribute of the same index. Locations with no attribute
