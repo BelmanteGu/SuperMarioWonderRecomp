@@ -398,6 +398,7 @@ void crash(int sig, siginfo_t* info, void* uc) {
             nx::log("  x%-2d %016llx %016llx %016llx %016llx", k, (unsigned long long)c.x[k],
                     (unsigned long long)c.x[k + 1], (unsigned long long)c.x[k + 2], (unsigned long long)c.x[k + 3]);
         nx::backtrace(c);
+        nx::log_recent_files();
     }
     // Hand the signal to the previous handler, Android's debuggerd: it logs the host backtrace (a tombstone).
     const struct sigaction& prev = g_previous[sig];
