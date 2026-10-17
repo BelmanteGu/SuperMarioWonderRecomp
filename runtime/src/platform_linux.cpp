@@ -475,6 +475,7 @@ void crash_handler(int sig, siginfo_t* info, void* uc) {
         nx::log("  x%-2d %016llx %016llx %016llx %016llx", k, (unsigned long long)c.x[k], (unsigned long long)c.x[k + 1],
                 (unsigned long long)c.x[k + 2], (unsigned long long)c.x[k + 3]);
     nx::backtrace(c);
+    nx::log_recent_files();
     std::fflush(nullptr);
     signal(sig, SIG_DFL);
     raise(sig);

@@ -26,7 +26,7 @@ README.
 | `NX_SKIP_FS=<hash>,<hash>` | drops draws with those fragment shaders (measure what they cost, or hide a broken one) | nvn_draw.cpp |
 | `NX_INPUT_SCRIPT="<s>:<button>:<hold s>;..."` | presses buttons at times after the first pad read (A B X Y L R ZL ZR PLUS MINUS LEFT RIGHT UP DOWN; directions also push the stick) | input_script.cpp |
 | `NX_INPUT="<frame>:<button>,..."` | older, per presented frame, 8-frame presses | hle_hid.cpp |
-| `NX_TRACE_FS=1` | every file the game opens or looks for; also counts reads of streamed audio (`.bwav`) | hle_fs.cpp |
+| `NX_TRACE_FS=1` | every file the game opens or looks for, every directory it opens, host open failures (errno); also counts reads of streamed audio (`.bwav`). Crash reports always end with the last 24 opens (DEBUG-2 #93) | hle_fs.cpp |
 | `NX_HEADLESS=1` | no visible window, nothing presented; frames still render and dump (unattended runs) | platform_mac.cpp, nvn_vk.cpp |
 | `NX_MEM_LIMIT_GB=<n>` | the memory guard ends the process past this footprint (default 8); `memory:` lines every 30 s | memguard_mac.cpp |
 | `NX_THREAD_DUMP_AT=<s>` | once, every guest thread's call chain (frame-pointer walk) | kernel.cpp |
