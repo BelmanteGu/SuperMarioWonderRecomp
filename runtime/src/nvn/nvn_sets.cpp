@@ -9,6 +9,7 @@
 #include <string>
 
 #include "nvn_draw_state.h"
+#include "nvn_ultrawide.h"
 
 namespace nx::nvn::replay {
 
@@ -406,6 +407,11 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
     buffers.reserve(1024), images.reserve(1024), writes.reserve(2048);  // pointers into them are kept
     float vw = g_state.has_viewport ? float(g_state.viewport[2]) : 1280.0f;
     float vh = g_state.has_viewport ? float(g_state.viewport[3]) : 720.0f;
+    if (g_uw_wide && g_state.has_viewport) {  // NX_ULTRAWIDE: the viewport the shaders see is the widened one
+        int32_t x = g_state.viewport[0], w = g_state.viewport[2];
+        uw_span(x, w, UINT32_MAX);
+        vw = float(w);
+    }
     SupportBuffer sb;  // built when a binding gets a copy of its own
     bool sb_built = false;
     auto support = [&]() -> VkDescriptorBufferInfo {

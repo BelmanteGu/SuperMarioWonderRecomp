@@ -194,6 +194,7 @@ struct Texture : Object {
     uint32_t width = 0, height = 0, depth = 0, stride = 0;
     uint64_t pool = 0, offset = 0, storage_size = 0;
     uint64_t memory = 0, gpu = 0;
+    bool uw = false;  // NX_ULTRAWIDE: a screen-sized render target whose width was widened (nvn_ultrawide.cpp)
     uint32_t block_height_gobs = 0;  // packaged (BNTX) textures carry their own; 0: the layout's default
     uint8_t swizzle[4] = {2, 3, 4, 5};  // NVNtextureSwizzle per channel (0 zero, 1 one, 2 R, 3 G, 4 B, 5 A)
     // nvnTextureWriteTexels data not yet on the GPU (a glyph cache is filled this way): applied before the next use.

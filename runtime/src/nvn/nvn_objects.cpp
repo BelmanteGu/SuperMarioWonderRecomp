@@ -9,6 +9,7 @@
 #include <set>
 
 #include "nvn.h"
+#include "nvn_ultrawide.h"
 #include "platform.h"
 
 namespace nx::nvn {
@@ -299,6 +300,7 @@ void TextureInitialize(CPU& c) {  // NVNboolean (NVNtexture*, const NVNtextureBu
     t.pool = driver(c, "nvnTextureBuilderGetMemoryPool", {builder});
     t.offset = driver(c, "nvnTextureBuilderGetMemoryOffset", {builder});
     t.storage_size = texture_storage_size(c, builder);
+    uw_widen_texture(t);  // NX_ULTRAWIDE: screen-sized render targets get the display's width
     if (old) {
         std::lock_guard lk(objects_lock());
         pool_textures()[t.pool].insert(guest);

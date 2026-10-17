@@ -12,6 +12,7 @@
 #include <set>
 
 #include "nvn_draw_state.h"
+#include "nvn_ultrawide.h"
 #include "platform.h"
 
 namespace nx::nvn {
@@ -316,6 +317,11 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
         return t;
     }();
     vertex_read_barrier(cb, vs);  // G4
+    g_uw_wide = false;  // NX_ULTRAWIDE: is this draw's target a widened one (viewport, scissor, clears, vs scale)
+    if (uw_on()) {
+        GpuImage* wi = t.color_count && t.colors[0] ? image_of(t.colors[0]) : (t.depth ? image_of(t.depth) : nullptr);
+        g_uw_wide = wi && wi->uw;
+    }
     bool need_break = gathered & kNeedBreak;
     if (gathered & kSampledPending) clears_flush(cb);  // cleared (and stored) before it is sampled
     static const bool bytes = std::getenv("NX_TARGETS_MEMCMP") != nullptr;  // bisecting
@@ -365,6 +371,54 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     }
     GpuImage* dimg = tt.depth ? image_of(tt.depth) : nullptr;
     key.depth_format = dimg && dimg->aspect != VK_IMAGE_ASPECT_COLOR_BIT ? dimg->format : VK_FORMAT_UNDEFINED;
+    // NX_ULTRAWIDE. The world is widened by the camera aspect patch (nvn_ultrawide.cpp), so only the 16:9 UI is
+    // squeezed by 1/k (centred safe area). The UI is drawn into small BGRA8 layer targets (430x180 for the HUD, never
+    // widened) and composited into the scene target by a quad: the vertex shaders seen drawing into such layer targets
+    // are the "UI" ones, and a UI quad into a widened target that does not sample a widened texture is squeezed.
+    // NX_UW_CAMERA=0 (no camera patch): every geometry draw is squeezed, a world-and-UI shrink.
+    static const bool cam_patch = !(std::getenv("NX_UW_CAMERA") && std::getenv("NX_UW_CAMERA")[0] == '0');
+    if (uw_on() && cam_patch && !g_uw_wide && t.color_count && t.colors[0]) {
+        const Texture* lt = get<Texture>(t.colors[0]);
+        if (lt && lt->format == 0x25 && (lt->flags & 8)) uw_ui_vertex_shader(vs);
+    }
+    // NX_UW_UI=learn: only the vertex shaders learned above; default: every draw without depth test (screen-space UI).
+    static const bool ui_learn = std::getenv("NX_UW_UI") && std::string(std::getenv("NX_UW_UI")) == "learn";
+    const bool ui_pick = !cam_patch || (ui_learn ? uw_is_ui_vertex_shader(vs) : !g_state.depth.depth_test);
+    if (g_uw_wide && uw_vs_scaled(vs) && ui_pick) {
+        // A short draw (a triangle or a quad) that samples a widened render target is a screen-space pass (post
+        // chain, composite): it already covers the widened target.
+        bool samples_wide = false;
+        const uint64_t count = indexed ? uint64_t(c.i[0]) : uint64_t(c.i[1]);
+        if (count <= 6)
+            for (const ResolvedTexture& r : g_textures.resolved)
+                if (r.texture)
+                    if (GpuImage* si = image_of(r.texture); si && si->uw) samples_wide = true;
+        if (!samples_wide) key.uw_x = 1.0f / uw_factor();
+    }
+    if (uw_on()) {  // NX_UW_TRACE=<first draw>:<count>: draws (wide = a widened target)
+        static const char* e = std::getenv("NX_UW_TRACE");
+        static uint64_t from = 0, n = 0;
+        static bool init = [&] { if (e) std::sscanf(e, "%lu:%lu", &from, &n); return true; }();
+        (void)init;
+        if (e && g_stats.total >= from && g_stats.total < from + n) {
+            GpuImage* wi = t.color_count && t.colors[0] ? image_of(t.colors[0]) : nullptr;
+            const Texture* tx = t.color_count && t.colors[0] ? get<Texture>(t.colors[0]) : nullptr;
+            std::string smp;
+            for (const ResolvedTexture& r : g_textures.resolved) {
+                GpuImage* si = r.texture ? image_of(r.texture) : nullptr;
+                char bb[48];
+                const Texture* st = r.texture ? get<Texture>(r.texture) : nullptr;
+                std::snprintf(bb, sizeof bb, " %ux%u%s(f%x,fmt%x,%llx)", si ? si->width : 0, si ? si->height : 0, si && si->uw ? "w" : "", st ? st->flags : 0, st ? st->format : 0, (unsigned long long)r.texture);
+                smp += bb;
+            }
+            log("uwsamples:%s", smp.c_str());
+            log("uwdraw %llu vs %s fs %s %s count %d tgt %ux%u fl %x fmt %x wide %d scaled %d dt %d dw %d bl %d vp %d %d %d %d", (unsigned long long)g_stats.total,
+                vs->hash.c_str(), fs ? fs->hash.c_str() : "-", indexed ? "idx" : "arr", indexed ? c.i[0] : c.i[1],
+                wi ? wi->width : 0, wi ? wi->height : 0, tx ? tx->flags : 0, wi ? wi->nvn_format : 0, g_uw_wide ? 1 : 0, key.uw_x > 0 ? 1 : 0,
+                g_state.depth.depth_test, g_state.depth.depth_write, g_state.color.blend_enable[0],
+                g_state.viewport[0], g_state.viewport[1], g_state.viewport[2], g_state.viewport[3]);
+        }
+    }
     VkPipeline pipeline = graphics_pipeline(key, layout);
     if (!pipeline) {
         g_stats.no_pipeline++;
@@ -394,11 +448,23 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     // (Before this, the front face was inverted instead: triangles were culled right, but every render target was
     // upside down, which the post chain undid in some scenes and not in others: the first course showed a
     // mirrored sky.)
-    vp.y += vp.height, vp.height = -vp.height;
     VkRect2D sc{{0, 0}, g_pass_extent};
     if (g_state.has_scissor)
         sc = {{std::max(0, g_state.scissor[0]), std::max(0, g_state.scissor[1])},
               {uint32_t(std::max(0, g_state.scissor[2])), uint32_t(std::max(0, g_state.scissor[3]))}};
+    if (g_uw_wide) {  // NX_ULTRAWIDE: the guest's 16:9 pixel spans, widened
+        if (g_state.has_viewport) {
+            int32_t x = int32_t(vp.x), w = int32_t(vp.width);
+            uw_span(x, w, g_pass_extent.width);
+            vp.x = float(x), vp.width = float(w);
+        }
+        if (g_state.has_scissor) {
+            int32_t x = sc.offset.x, w = int32_t(sc.extent.width);
+            uw_span(x, w, g_pass_extent.width);
+            sc.offset.x = x, sc.extent.width = uint32_t(w);
+        }
+    }
+    vp.y += vp.height, vp.height = -vp.height;
     set_dynamic(cb, vp, sc);
 
     trace_skin(indexed, c, vs, fs);

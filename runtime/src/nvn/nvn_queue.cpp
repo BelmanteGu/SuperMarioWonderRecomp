@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "nvn.h"
+#include "nvn_ultrawide.h"
 #include "platform.h"
 
 namespace nx::nvn {
@@ -390,6 +391,8 @@ void QueuePresentTexture(CPU& c) {
     }
     work_from = plat::monotonic_ns();
     uint64_t n = ++g_presents;
+    uw_scan(n);
+    uw_cameras(n);
     if (n == 1 || (n & (n - 1)) == 0) log("nvn: present #%llu (texture %d)", (unsigned long long)n, int(c.x[2]));
     g_frame++;
 }
@@ -399,6 +402,7 @@ void QueuePresentTexture(CPU& c) {
 void WindowSetCrop(CPU& c) {
     if (auto* w = get<Window>(c.x[0])) {
         int32_t v[4] = {int32_t(c.x[1]), int32_t(c.x[2]), int32_t(c.x[3]), int32_t(c.x[4])};
+        uw_crop(v);  // NX_ULTRAWIDE
         if (std::memcmp(v, w->crop, sizeof v) != 0) {
             static int logged = 0;
             if (logged++ < 20) log("nvn: window crop %d,%d %dx%d", v[0], v[1], v[2], v[3]);
