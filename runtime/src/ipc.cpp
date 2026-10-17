@@ -271,7 +271,7 @@ uint32_t ipc_request(CPU& c, uint32_t handle, uint64_t buf, uint64_t) {
             end += 4;
         }
         uint32_t words = uint32_t((end - (buf + dstart * 4)) / 4) + 4;
-        w[0] = 0;
+        w[0] = ctx.type;
         w[1] = words | (has_special ? 0x80000000u : 0);
         return 0;
     }
@@ -295,7 +295,11 @@ std::shared_ptr<KSharedMemory> make_shared_memory(const std::string& name, uint6
 uint32_t map_shared_memory(KSharedMemory& s, uint64_t addr, uint64_t size) {
     // The guest picks `addr`; we cannot alias pages cheaply, so the service keeps writing to s.host and the
     // guest reads at addr. Record the mapping: services update both through shm_sync().
-    commit(addr, size);
+    if (!commit(addr, size)) {
+        log("map_shared_memory(%s): commit %llx (+%llx) failed", s.name.c_str(), (unsigned long long)addr,
+            (unsigned long long)size);
+        return 0xDC01;
+    }
     vm_set(addr, size, 0x06 /* shared */, 3);
     std::memcpy(reinterpret_cast<void*>(addr), reinterpret_cast<void*>(s.host), std::min(size, s.size));
     s.host = addr;  // from now on the service writes straight to the guest's view

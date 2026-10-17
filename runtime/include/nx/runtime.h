@@ -29,10 +29,12 @@ constexpr uint64_t kThunkSize = 0x100000ull;
 #if defined(__APPLE__)
 // macOS: only 0x3_0000_0000..0xF_FFFF_FFFF is free below 0x70_0000_0000 (see NX_BASE).
 constexpr uint64_t kHeapBase = 0x400000000ull;
-constexpr uint64_t kAliasBase = 0x600000000ull;
-constexpr uint64_t kAliasSize = 0x400000000ull;
-constexpr uint64_t kStackBase = 0xA00000000ull;
-constexpr uint64_t kKernelBase = 0xB00000000ull;
+// macOS 26+ (measured on 26.6): 0x6_0000_0000 is unusable; the alias sits flush after the heap through ~0x6_ec.
+constexpr uint64_t kAliasBase = 0x580000000ull;
+constexpr uint64_t kAliasSize = 0x16c000000ull;
+// 0xA..0xC6: mmap hints are ignored (maps land near 0x70); 4 GiB stack+kernel fit at 0xC7..0xE7 on macOS 26+.
+constexpr uint64_t kStackBase = 0xC70000000ull;
+constexpr uint64_t kKernelBase = 0xD70000000ull;
 constexpr uint64_t kThunkBase = 0xE00000000ull;
 #else
 constexpr uint64_t kHeapBase = 0x5000000000ull;
@@ -52,6 +54,16 @@ constexpr uint64_t kKernelBase = 0x6A00000000ull;
 constexpr uint64_t kThunkBase = 0x6F00000000ull;
 #endif
 // kKernelBase: TLS pages, main thread stack (memory we hand out). kThunkBase: HLE function addresses (never mapped).
+
+// The alias region svcGetInfo reports (on macOS the base/size are chosen at startup).
+extern uint64_t g_alias_base;
+extern uint64_t g_alias_size;
+extern uint64_t g_stack_base;
+extern uint64_t g_kernel_base;
+inline uint64_t alias_base() { return g_alias_base; }
+inline uint64_t alias_size() { return g_alias_size; }
+inline uint64_t stack_base() { return g_stack_base; }
+inline uint64_t kernel_base() { return g_kernel_base; }
 
 void memory_init();
 bool commit(uint64_t addr, uint64_t size);   // make [addr, addr+size) read/write

@@ -94,14 +94,37 @@ PadState g_pad;
 // ---- memory ---------------------------------------------------------------------------------------------------
 
 // No MAP_FIXED_NOREPLACE on Darwin: ask for the address as a hint and give it back if the kernel chose another.
+// One large mmap often fails on recent macOS (a 16 GiB alias reservation is rejected even when the same range can be
+// taken in smaller pieces), so fall back to fixed-size chunks.
 bool reserve(uint64_t addr, uint64_t size) {
-    void* p = mmap(reinterpret_cast<void*>(addr), size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-    if (p == MAP_FAILED) return false;
-    if (uint64_t(p) != addr) {
-        munmap(p, size);
-        return false;
-    }
-    return true;
+    constexpr uint64_t kChunk = 0x4000000;  // 64 MiB
+    auto try_map = [&](uint64_t off, uint64_t n, bool fixed) {
+        int flags = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE;
+        if (fixed) flags |= MAP_FIXED;
+        void* p = mmap(reinterpret_cast<void*>(addr + off), n, PROT_NONE, flags, -1, 0);
+        if (p == MAP_FAILED) return false;
+        if (!fixed && uint64_t(p) != addr + off) {
+            // Darwin ignores the hint for some high VAs and maps elsewhere; drop that mapping or later reserves fail.
+            munmap(p, n);
+            return false;
+        }
+        return true;
+    };
+    auto reserve_chunks = [&](bool fixed) {
+        for (uint64_t off = 0; off < size; off += kChunk) {
+            uint64_t n = std::min(kChunk, size - off);
+            if (!try_map(off, n, fixed)) {
+                for (uint64_t u = 0; u < off; u += kChunk)
+                    munmap(reinterpret_cast<void*>(addr + u), std::min(kChunk, off - u));
+                return false;
+            }
+        }
+        return true;
+    };
+    if (try_map(0, size, false)) return true;
+    if (reserve_chunks(false)) return true;
+    if (reserve_chunks(true)) return true;
+    return false;
 }
 
 bool commit(uint64_t addr, uint64_t size) {
@@ -489,6 +512,10 @@ int main() {
     sigaction(SIGBUS, &sa, nullptr);
     sigaction(SIGILL, &sa, nullptr);
     sigaction(SIGFPE, &sa, nullptr);
+
+    // Reserve the guest layout before SDL/MoltenVK load: on macOS 26 they map into the same high VA we use for heap
+    // and alias if we wait until nx::boot() on the game thread.
+    nx::memory_init();
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
         std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());

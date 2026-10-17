@@ -1,8 +1,12 @@
 // time:u / time:a / time:s: clocks, time zone, and the shared memory the SDK reads the clocks from.
 #include <chrono>
+#include <cstring>
 #include <ctime>
 
+#include <nx/runtime.h>
+
 #include "ipc.h"
+#include "platform.h"
 
 namespace nx {
 
@@ -48,26 +52,42 @@ long utc_offset_west() {
     return long(utc_from_tm(gt) - utc_from_tm(lt));
 }
 
+void write_steady_clock_context(uint64_t p) {
+    st<uint64_t>(p, 0);
+    st<uint64_t>(p + 8, kSourceLo);
+    st<uint64_t>(p + 16, kSourceHi);
+}
+
+void write_system_clock_context(uint64_t p, int64_t offset) {
+    st<int64_t>(p, offset);
+    st<int64_t>(p + 8, 0);
+    st<uint64_t>(p + 16, kSourceLo);
+    st<uint64_t>(p + 24, kSourceHi);
+}
+
+void write_continuous_adjustment(uint64_t p) {
+    st<uint64_t>(p, plat::monotonic_ns());
+    st<int64_t>(p + 8, 1);
+    st<int64_t>(p + 16, 0);
+    write_system_clock_context(p + 24, 0);
+}
+
 std::shared_ptr<KSharedMemory> time_shared_memory() {
     static std::shared_ptr<KSharedMemory> shm = [] {
         auto s = make_shared_memory("time", 0x1000);
         uint64_t p = s->host;
-        // LockFreeAtomicType<SteadyClockContext> at 0x0: u32 counter, pad, value[2] {u64 internal_offset; uuid}
-        for (int k = 0; k < 2; k++) {
-            st<uint64_t>(p + 0x8 + k * 0x18, 0);
-            st<uint64_t>(p + 0x10 + k * 0x18, kSourceLo);
-            st<uint64_t>(p + 0x18 + k * 0x18, kSourceHi);
-        }
-        // Local (0x38) and network (0x80) system clocks: {s64 offset; {s64 time_point; uuid}}
+        std::memset(reinterpret_cast<void*>(p), 0, 0x1000);
         int64_t offset = unix_now() - steady_seconds();
-        for (uint64_t base : {0x38ull, 0x80ull})
-            for (int k = 0; k < 2; k++) {
-                uint64_t v = p + base + 8 + k * 0x20;
-                st<int64_t>(v, offset);
-                st<int64_t>(v + 8, 0);
-                st<uint64_t>(v + 16, kSourceLo);
-                st<uint64_t>(v + 24, kSourceHi);
-            }
+        // Layout matches Horizon time shared memory (see Ryujinx TimeSharedMemory).
+        write_steady_clock_context(p + 0x8);
+        write_steady_clock_context(p + 0x20);
+        write_system_clock_context(p + 0x40, offset);
+        write_system_clock_context(p + 0x60, offset);
+        write_system_clock_context(p + 0x88, offset);
+        write_system_clock_context(p + 0xa8, offset);
+        st<uint8_t>(p + 0xcc, 0);  // automatic user clock correction disabled
+        write_continuous_adjustment(p + 0xd8);
+        write_continuous_adjustment(p + 0xd8 + 56);
         return s;
     }();
     return shm;
@@ -161,6 +181,13 @@ void time_static(Service& s) {
     s.cmds[100] = [](IpcCtx& c) { c.push<uint8_t>(0); return 0u; };  // IsStandardUserSystemClockAutomaticCorrectionEnabled
     s.cmds[300] = [](IpcCtx& c) { c.push<int64_t>(unix_now()); return 0u; };  // CalculateMonotonicSystemClockBaseTimePoint
 }
+
+#if defined(__APPLE__)
+// Wonder calls this in nnMain before the nn::os native-handle import path maps time:u's shared memory. Remove when
+// SharedMemoryImplByHorizon can attach service handles returned by GetSharedMemoryNativeHandle.
+static void time_initialize_hle(CPU& c) { (void)c; }
+NX_HLE("_ZN2nn4time10InitializeEv", time_initialize_hle);
+#endif
 
 ServiceRegistrar r_time_u("time:u", [] { auto s = std::make_shared<Service>("time:u"); time_static(*s); return s; });
 ServiceRegistrar r_time_a("time:a", [] { auto s = std::make_shared<Service>("time:a"); time_static(*s); return s; });
