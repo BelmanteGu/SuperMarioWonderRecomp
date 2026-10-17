@@ -16,7 +16,8 @@ On Hades' `main` (1.61M instructions) it takes about a minute, and the output bu
 
 ## Design
 
-- **Guest memory is host memory.** The module is mapped at `NX_BASE` (a compile-time constant, default `0x40_0000_0000`).
+- **Guest memory is host memory.** The module is mapped at `NX_BASE` (default `0x40_0000_0000`; selected and reserved
+  at startup on macOS to avoid the system's shared cache and heap).
   ADRP/ADR/literals are emitted as `NX_BASE + offset`, so every guest pointer is a host pointer. There is no translation and no byte swap (both sides are little endian).
 - **Context.** `nx::CPU` holds x0–x30 and SP (`x[31]`), v0–v31 as `V128` unions, NZCV as four bytes, FPCR/FPSR, TPIDR/TPIDRRO and the exclusive monitor.
 - **Control flow.** Branches inside a function become `goto`. A branch out of the function is a tail call. `BL` is a direct call.
