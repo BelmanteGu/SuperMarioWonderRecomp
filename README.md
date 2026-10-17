@@ -180,6 +180,7 @@ Useful switches:
 | Switch | What it does |
 |---|---|
 | `NX_MEM_LIMIT_GB=<n>` | memory guard, ends the process past this footprint (default 8) |
+| `NX_LANGUAGE=<code>` | the game's language, as the console spells it: `es`, `es-419`, `en-US`, `en-GB`, `fr`, `fr-CA`, `de`, `it`, `nl`, `pt`, `pt-BR`, `ru`, `ja`, `ko`, `zh-Hans`, `zh-Hant` (`es-ES` and other ISO names are accepted as aliases). Falls back to `<data root>/language.txt`, else `en-US` |
 | `NX_HEADLESS=1` | no window, for unattended test runs |
 | `NX_MUTE=1` | no sound |
 | `NX_HANDHELD=1` | handheld mode, 720p |

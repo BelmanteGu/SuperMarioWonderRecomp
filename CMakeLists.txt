@@ -89,6 +89,7 @@ set(NX_RUNTIME_SOURCES
     runtime/src/kernel_watch.cpp
     runtime/src/ipc.cpp
     runtime/src/svc_am.cpp
+    runtime/src/svc_set.cpp
     runtime/src/svc_misc.cpp
     runtime/src/svc_time.cpp
     runtime/src/svc_process.cpp
