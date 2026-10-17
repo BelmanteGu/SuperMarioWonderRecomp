@@ -47,11 +47,18 @@ recompiled code and the translated shaders built on Linux are byte for byte the 
 
 ## State
 
+![gameplay, ultrawide 21:9 on an RTX 3050](docs/media/wonder/gameplay-ultrawide-rtx.gif)
+
+*The Flower Kingdom intro on Linux, NVIDIA RTX 3050, ultrawide 21:9 (`NX_ULTRAWIDE=1`, 2560x1080; GIF at 15 fps).*
+
 | Title | Character select |
 |---|---|
-| ![title](docs/media/wonder/37-title.png) | ![select](docs/media/wonder/35-character-select-samplers.png) |
-| **World map** | **Course 1-1, 60 fps** |
-| ![map](docs/media/wonder/39-world-map-player.png) | ![course](docs/media/wonder/38-course-60fps-pipelined.png) |
+| ![title](docs/media/wonder/40-title-ultrawide-rtx.jpg) | ![select](docs/media/wonder/41-character-select-ultrawide-rtx.jpg) |
+| **Flower Kingdom intro** | **Opening at the castle** |
+| ![course](docs/media/wonder/42-course-ultrawide-rtx.jpg) | ![castle](docs/media/wonder/43-castle-ultrawide-rtx.jpg) |
+
+*All four on Linux, RTX 3050, ultrawide 2560x1080. Gameplay gets a wider view of the level; menus stay a centred
+16:9 area with the backdrop's edges at the sides (see [Ultrawide, frame rate and integrated GPUs](#ultrawide-frame-rate-and-integrated-gpus)).*
 
 ### What works
 
@@ -80,8 +87,45 @@ The details are in the GitHub milestones.
 - **Windowed confirmation of the W7 glitch fixes (#43-#45, #47):** horizon band, silhouettes, present mode.
 - **Character-select blur:** needs a reference from a real console.
 - **Android rendering bugs and performance:** hand-off notes in [docs/nvn/android-perf/](docs/nvn/android-perf/).
-- **Linux:** gameplay speed not measured yet with a window; SDL3 was built without Wayland, so the window goes
-  through XWayland on a Wayland desktop.
+- **Intel integrated GPUs: characters and near terrain black (found 2026-10-17, not fixed).** On an Intel UHD (Mesa
+  ANV) the lit shaders read NaN from a low-resolution lighting buffer; the NaN comes from an `Fma` in three
+  character-lighting shaders. NVIDIA is not affected. Cause, evidence and next step in
+  [docs/nvn/studies/summary-1710.md](docs/nvn/studies/summary-1710.md#open-bug-black-silhouettes-on-intel-not-fixed).
+- **Ultrawide:** HUD not anchored to the screen edges, menu backdrops leave side bands, restart after resizing.
+- **Above 60 fps:** the game steps once per frame, so a faster vsync speeds the game up; no real unlock yet.
+- **Linux:** SDL3 was built without Wayland, so the window goes through XWayland on a Wayland desktop.
+
+### Ultrawide, frame rate and integrated GPUs
+
+Studied, implemented and measured on 2026-10-17 on the Linux port (summary and numbers in
+[docs/nvn/studies/summary-1710.md](docs/nvn/studies/summary-1710.md); the three studies:
+[ultrawide](docs/nvn/studies/ultrawide-1710.md), [fps unlock](docs/nvn/studies/fps-unlock-1710.md),
+[Intel iGPU](docs/nvn/studies/intel-igpu-1710.md)).
+
+- **Ultrawide (`NX_ULTRAWIDE=1`):** the render targets are widened to the window's shape and the game's cameras get
+  the wider aspect, so 21:9 and 32:9 show more of the level instead of stretching or bars. Off by default and free
+  when off.
+- **Frame rate:** `NX_FPS_CAP=30` holds the game's own 30 fps mode (flat 30.0 on both GPUs, less CPU). Running
+  above 60 is not possible by a switch: the simulation advances once per frame (`NX_DISPLAY_HZ` exists only as an
+  experiment and speeds the game up).
+- **Integrated GPUs:** submits are pipelined by default there (`NX_PIPELINED=0` to turn off) and bound buffers are
+  no longer padded where the GPU bound-checks (`NX_PAD_BUFFERS=1` to restore). `tools/wonder_linux.sh intel` and
+  `lightest` are the presets for them.
+
+Flower Kingdom intro, unattended runs (frames produced per second; Intel UHD ADL-S GT0.5 and RTX 3050 Laptop, same
+machine):
+
+| Configuration | Intel | RTX 3050 |
+|---|---|---|
+| before (docked 1080p) | 26.4 | 29.5 |
+| now, defaults (docked 1080p) | 31.3 | 30.5 |
+| handheld 720p, pipelined | 41.4 | 53.2 |
+| preset `intel` (720p, pipelined, 30 fps cap) | 30.0 flat | 30.0 flat |
+| ultrawide 2560x1080, 720p, pipelined | 35.4 | 52.8 |
+
+The Intel game numbers were taken with the black-silhouette bug above (the picture is wrong in gameplay on Intel):
+
+![Intel vs RTX](docs/media/wonder/44-intel-silhouettes-vs-rtx.jpg)
 
 ### Windows
 
@@ -161,8 +205,12 @@ the game on the phone from a folder with your `prod.keys` and your XCI/NSP, has 
 - **Optimization that worked (S23, one scene, one run each):** the "Flower Kingdom" fountain scene ran at **24 fps** with the
   default synchronous submits and at **60 fps** with `NX_PIPELINED=2` ("GPU submits in flight = 2" in Settings > Performance):
   replay 20.6 to 9.7 ms and GPU wait 12.7 to 1.3 ms per frame, because the CPU replay and the GPU no longer run in series.
-  It is still **off by default** (it once drew exploded meshes in some courses): turn it on, and go back if the geometry breaks.
+  Since 2026-10-17 it is **on by default** on integrated GPUs, phones included ("Automatic"); it once drew exploded meshes
+  in some courses, so "Synchronous" in the same setting is the way back if the geometry breaks.
   The 30 fps limit and the docked mode have not been timed on a phone yet.
+- **New in the launcher (2026-10-17, built but not yet run on a phone):** Image > **Widescreen** (fills a 19.5:9 / 20:9 screen
+  with a wider view instead of side bars), Performance > **Screen rate** 90/120 Hz (experimental: the game runs faster),
+  Advanced > **Buffer padding** (the safe mode if HUD text or characters glitch).
 - Measurements, recommended settings, what has and has not run on a device: [docs/WONDER-ANDROID-OPTIONS.md](docs/WONDER-ANDROID-OPTIONS.md).
 
 Touch controls:
@@ -211,7 +259,11 @@ Useful switches:
 | `NX_HEADLESS=1` | no window, for unattended test runs |
 | `NX_MUTE=1` | no sound |
 | `NX_HANDHELD=1` | handheld mode, 720p |
-| `NX_PIPELINED=0` | waits for every submit, as before 60 fps (diagnosis) |
+| `NX_PIPELINED=0` | waits for every submit, as before 60 fps (diagnosis); integrated GPUs pipeline by default |
+| `NX_ULTRAWIDE=1` | ultrawide: a wider view to the window's shape (`=2560x1080` or `=21:9` to force one) |
+| `NX_FPS_CAP=30` | the game's own 30 fps mode, always (steady, lighter) |
+| `NX_PAD_BUFFERS=1` | pads bound buffers again (if HUD text or characters glitch on a GPU) |
+| `NX_DISPLAY_HZ=<hz>` | experimental: vsync at another rate; the game runs faster or slower, not smoother |
 
 Every debug switch (draw traces, snapshots, bisecting toggles) is listed in [docs/nvn/SWITCHES.md](docs/nvn/SWITCHES.md).
 
