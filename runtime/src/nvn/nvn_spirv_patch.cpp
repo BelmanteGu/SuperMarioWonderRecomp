@@ -403,6 +403,50 @@ bool default_unwritten_inputs(const std::vector<uint32_t>& in, uint32_t location
     return true;
 }
 
+// ---- vertex outputs start at zero ----------------------------------------------------------------------------------
+// A vertex shader may write an output only on some paths, or only some of its components: the rest is undefined in
+// SPIR-V. On Maxwell it reads back as whatever the register held (zero in practice); Mesa ANV leaves the garbage of
+// the previous vertex's registers there, NaN included, and the fragment shader that normalizes the tangent frame turns
+// it into NaN lighting (the black characters and terrain on the Intel UHD, docs/nvn/studies/intel-60fps-1710.md).
+// zero_vertex_outputs() gives every Location output variable of a vertex module a zero initializer. Defined results
+// are unchanged: only a component that was never stored reads 0 instead of an undefined value.
+bool zero_vertex_outputs(const std::vector<uint32_t>& in, std::vector<uint32_t>& out) {
+    enum : uint32_t { OpEntryPointOp = 15, OpConstantNull = 46, StorageOutput = 3, ModelVertex = 0 };
+    if (in.size() < 5) return false;
+    std::vector<Inst> insts;
+    for (size_t i = 5; i < in.size();) {
+        uint32_t len = in[i] >> 16;
+        if (!len || i + len > in.size()) return false;
+        insts.push_back({i, in[i] & 0xffff, len});
+        i += len;
+    }
+    std::map<uint32_t, uint32_t> location, pointee;  // variable -> Location; pointer type -> pointee type
+    bool vertex = false;
+    for (const Inst& n : insts) {
+        const uint32_t* w = &in[n.at];
+        if (n.op == OpEntryPointOp && n.len >= 3) vertex |= w[1] == ModelVertex;
+        else if (n.op == OpDecorate && n.len >= 4 && w[2] == DecorationLocation) location[w[1]] = w[3];
+        else if (n.op == OpTypePointer && n.len == 4 && w[2] == StorageOutput) pointee[w[1]] = w[3];
+    }
+    if (!vertex) return false;
+    uint32_t bound = in[3];
+    bool any = false;
+    out.assign(in.begin(), in.begin() + 5);
+    for (const Inst& n : insts) {
+        const uint32_t* w = &in[n.at];
+        if (n.op == OpVariable && n.len == 4 && w[3] == StorageOutput && location.count(w[2]) && pointee.count(w[1])) {
+            uint32_t zero = bound++;
+            out.insert(out.end(), {(3u << 16) | OpConstantNull, pointee[w[1]], zero});
+            out.insert(out.end(), {(5u << 16) | OpVariable, w[1], w[2], StorageOutput, zero});
+            any = true;
+            continue;
+        }
+        out.insert(out.end(), w, w + n.len);
+    }
+    out[3] = bound;
+    return any;
+}
+
 // ---- position invariance ----------------------------------------------------------------------------------------
 // The colour pass after a depth pre-pass tests EQUAL against depth another vertex shader wrote (DEBUG-2 #60). Two
 // shaders computing the same position can round differently when the driver contracts or reassociates them
@@ -498,6 +542,15 @@ std::vector<uint32_t> patched_spirv(const ShaderInfo* s, const uint8_t* kinds, u
             ok ? " read (0, 0, 0, 1)" : ", left as they are");
     }
     if (clamp_uniform_indices(code, next, nullptr)) code.swap(next);
+    static const bool zero_outputs = [] {  // NX_ZERO_VS_OUTPUTS=0 turns it off (1 turns it on for MoltenVK, not tried)
+        const char* e = std::getenv("NX_ZERO_VS_OUTPUTS");
+#if defined(__APPLE__)
+        return e && e[0] == '1';
+#else
+        return !(e && e[0] == '0');
+#endif
+    }();
+    if (zero_outputs && s->stage == ShaderStage::Vertex && zero_vertex_outputs(code, next)) code.swap(next);
     static const bool invariant = [] {
         const char* e = std::getenv("NX_INVARIANT");  // off by default: it did not change the Intel silhouettes
         return e && std::atoi(e) != 0;
