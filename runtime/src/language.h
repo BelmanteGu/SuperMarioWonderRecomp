@@ -73,8 +73,9 @@ inline uint64_t desired_language() {
         {"pt-BR", "pt-br brazilian portuguese-brazil brasil"},
         {"ru", "ru ru-ru russian ruso"},
         {"ko", "ko ko-kr korean coreano"},
-        {"zh-CN", "zh-cn chinesesimplified chinosimplificado"},
-        {"zh-TW", "zh-tw chinesetraditional chinotradicional"},
+        // The game knows the Chinese texts by zh-Hans / zh-Hant only: zh-CN / zh-TW alone send it to Japanese.
+        {"zh-Hans", "zh-hans zh-cn chinesesimplified chinosimplificado"},
+        {"zh-Hant", "zh-hant zh-tw chinesetraditional chinotradicional"},
     };
     for (const Entry& e : kTable) {
         std::string names = e.names;

@@ -110,8 +110,8 @@ std::shared_ptr<Service> application_functions() {
         s.cmds[20] = [](IpcCtx& c) { c.push<uint64_t>(0); return 0u; };  // EnsureSaveData
         s.cmds[21] = [](IpcCtx& c) {                                      // GetDesiredLanguage
             uint64_t code = desired_language();
-            char tag[6] = {0};
-            std::memcpy(tag, &code, 5);
+            char tag[9] = {0};
+            std::memcpy(tag, &code, 8);
             log("am: desired language = %s", tag);
             c.push<uint64_t>(code);
             return 0u;
