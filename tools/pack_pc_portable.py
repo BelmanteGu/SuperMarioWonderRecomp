@@ -29,7 +29,79 @@ set NX_DATA_ROOT=%~dp0data
 set NX_LOG=%~dp0data\nx.log
 if not defined NX_MEM_LIMIT_GB set NX_MEM_LIMIT_GB=8
 if not defined NX_GPU set NX_GPU=discrete
+rem The game's language: data\language.txt, written by Language.bat (see README, NX_LANGUAGE).
+if exist "%~dp0data\language.txt" set /p NX_LANGUAGE=<"%~dp0data\language.txt"
 start "" "%~dp0wonder.exe"
+"""
+
+# The language selector: writes data\language.txt, which Jogar.bat applies as NX_LANGUAGE. The codes are the
+# console's own (runtime/src/language.h): most are two letters ("es", "ja", ...), not "es-ES".
+LANGUAGE = r"""@echo off
+rem Super Mario Bros. Wonder (Switch recomp) - choose the game's language, saved to data\language.txt.
+chcp 65001 >nul
+setlocal
+title Super Mario Bros. Wonder - Language
+cd /d "%~dp0"
+if not exist "%~dp0data" mkdir "%~dp0data"
+
+:menu
+cls
+echo ====================================================
+echo    Super Mario Bros. Wonder  -  Language
+echo ====================================================
+echo.
+echo    Choose the language of the text and the voices:
+echo.
+echo     1  Spanish (Spain)            es
+echo     2  Spanish (Latin America)    es-419
+echo     3  English (US)               en-US
+echo     4  English (UK)               en-GB
+echo     5  French                     fr
+echo     6  French (Canada)            fr-CA
+echo     7  German                     de
+echo     8  Italian                    it
+echo     9  Japanese                   ja
+echo    10  Portuguese (Portugal)      pt
+echo    11  Portuguese (Brazil)        pt-BR
+echo    12  Dutch                      nl
+echo    13  Russian                    ru
+echo    14  Korean                     ko
+echo    15  Chinese (Simplified)       zh-Hans
+echo    16  Chinese (Traditional)      zh-Hant
+echo     0  Exit without changes
+echo.
+set "opt="
+set /p "opt=  Choice [1]: "
+if "%opt%"=="" set "opt=1"
+if "%opt%"=="0" exit /b 0
+if "%opt%"=="1"  set "code=es" & goto setlang
+if "%opt%"=="2"  set "code=es-419" & goto setlang
+if "%opt%"=="3"  set "code=en-US" & goto setlang
+if "%opt%"=="4"  set "code=en-GB" & goto setlang
+if "%opt%"=="5"  set "code=fr" & goto setlang
+if "%opt%"=="6"  set "code=fr-CA" & goto setlang
+if "%opt%"=="7"  set "code=de" & goto setlang
+if "%opt%"=="8"  set "code=it" & goto setlang
+if "%opt%"=="9"  set "code=ja" & goto setlang
+if "%opt%"=="10" set "code=pt" & goto setlang
+if "%opt%"=="11" set "code=pt-BR" & goto setlang
+if "%opt%"=="12" set "code=nl" & goto setlang
+if "%opt%"=="13" set "code=ru" & goto setlang
+if "%opt%"=="14" set "code=ko" & goto setlang
+if "%opt%"=="15" set "code=zh-Hans" & goto setlang
+if "%opt%"=="16" set "code=zh-Hant" & goto setlang
+goto menu
+
+:setlang
+> "%~dp0data\language.txt" echo %code%
+echo.
+echo   Saved: %code%   (data\language.txt)
+echo.
+set "go="
+set /p "go=  Start the game now? [Y/n]: "
+if /i "%go%"=="n" exit /b 0
+start "Wonder" cmd /c ""%~dp0Jogar.bat""
+exit /b 0
 """
 
 LEIAME = """Super Mario Bros. Wonder - recompilado para Windows (uso pessoal; dados do seu proprio cartucho, nao compartilhe)
@@ -109,7 +181,9 @@ def main():
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with zipfile.ZipFile(a.out, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
         z.writestr(TOP + "Jogar.bat", JOGAR.replace("\n", "\r\n"))
+        z.writestr(TOP + "Language.bat", LANGUAGE.replace("\n", "\r\n"))
         z.writestr(TOP + "LEIA-ME.txt", LEIAME.replace("\n", "\r\n"))
+        z.writestr(TOP + "data/language.txt", "en-US\r\n")
         for k, (p, name) in enumerate(files):
             z.write(p, TOP + name)
             if k % 2000 == 0:

@@ -78,6 +78,10 @@ foreach(mod main sdk)
                                -march=armv8.2-a+crypto)
     elseif(APPLE)
         target_compile_options(game_${mod} PRIVATE -O2 -fvisibility=hidden)
+    elseif(UNIX)
+        # Linux x86-64: AVX2/FMA/BMI as the Windows build (/arch:AVX2); no FMA contraction, so a guest fmul + fadd
+        # rounds twice, as on the Switch.
+        target_compile_options(game_${mod} PRIVATE -O2 -fvisibility=hidden -march=x86-64-v3 -ffp-contract=off)
     endif()
 endforeach()
 
@@ -89,6 +93,7 @@ set(NX_RUNTIME_SOURCES
     runtime/src/kernel_watch.cpp
     runtime/src/ipc.cpp
     runtime/src/svc_am.cpp
+    runtime/src/svc_set.cpp
     runtime/src/svc_misc.cpp
     runtime/src/svc_time.cpp
     runtime/src/svc_process.cpp
@@ -193,6 +198,18 @@ elseif(APPLE)
     target_compile_options(${NX_GAME} PRIVATE -fvisibility=hidden)
     # The executable loads near 0x1_0000_0000, below the guest ranges (0x40_0000_0000 and up). The game runs on its
     # own thread with a 64 MiB stack (platform_mac.cpp), so the main thread's stack size does not matter.
+elseif(UNIX)
+    # Linux: SDL3 (window, input, audio) and the system Vulkan loader, as on macOS. SDL3 from the distribution or a
+    # local build (-DCMAKE_PREFIX_PATH=<its install prefix>).
+    find_package(SDL3 REQUIRED CONFIG)
+    find_package(Threads REQUIRED)
+    find_path(NX_VULKAN_INCLUDE vulkan/vulkan.h HINTS "${NX_VULKAN_SDK}/include" /usr/include /usr/local/include)
+    add_executable(${NX_GAME} ${NX_RUNTIME_SOURCES} runtime/src/platform_linux.cpp runtime/src/memguard_linux.cpp)
+    target_include_directories(${NX_GAME} PRIVATE runtime/include runtime/src "${NX_GAME_DIR}" "${NX_VULKAN_INCLUDE}")
+    target_link_libraries(${NX_GAME} PRIVATE game_main game_sdk SDL3::SDL3 Threads::Threads ${CMAKE_DL_LIBS})
+    target_compile_options(${NX_GAME} PRIVATE -fvisibility=hidden -march=x86-64-v3 -ffp-contract=off)
+    # The executable (PIE) loads near 0x55_5555_0000_0000, far above the guest ranges (0x40_0000_0000 and up). The
+    # game runs on its own thread with a 64 MiB stack (platform_linux.cpp).
 else()
     add_executable(${NX_GAME} ${NX_RUNTIME_SOURCES} runtime/src/platform_win.cpp runtime/src/memguard_win.cpp)
     target_include_directories(${NX_GAME} PRIVATE runtime/include runtime/src "${NX_GAME_DIR}" "${NX_VULKAN_SDK}/Include")

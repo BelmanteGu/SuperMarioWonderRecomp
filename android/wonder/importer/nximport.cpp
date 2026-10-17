@@ -1304,6 +1304,7 @@ int import_main(Run& run, const std::vector<InputFile>& inputs, std::string& err
         uint64_t data0 = 16 + uint64_t(count) * 0x18 + strsz;
         if (data0 > pfs.size()) fail("ExeFS header truncated");
         mkdirs(root + "/analysis");
+        if (opt.keep_exefs) mkdirs(root + "/exefs");
         uint64_t exe_total = 0;
         for (uint32_t i = 0; i < count; i++) exe_total += rd64(pfs.data() + 16 + i * 0x18 + 8);
         run.pr = {"exefs", 0, exe_total, ""};
@@ -1328,6 +1329,11 @@ int import_main(Run& run, const std::vector<InputFile>& inputs, std::string& err
                 }
                 outb = nso_to_flat(blob, name);
                 rel = "analysis/" + name + ".bin";
+                if (opt.keep_exefs) {
+                    Writer raw(root + "/exefs/" + name);
+                    raw.write(blob.data(), blob.size());
+                    raw.commit();
+                }
                 has_main |= name == "main";
             } else {
                 outb = std::move(blob);
