@@ -1,6 +1,7 @@
 // nn::vi (display/layers) and nv:: (graphics driver setup) at the API level. The layer is the platform's window
 // (Win32 window / Android surface); its handle is the "native window" the game hands to vkCreateViSurfaceNN, which
 // the Vulkan bridge turns into the platform's surface.
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -11,6 +12,19 @@
 #include "platform.h"
 
 namespace nx {
+
+// NX_DISPLAY_HZ=<hz> (30..360; study fps-unlock-1710): the host vsync event and the present unit run at <hz> instead of
+// 60. Experimental: Wonder's logic steps one 1/60 s unit per present interval, so above 60 the game runs fast.
+uint64_t display_period_ns() {
+    static const uint64_t p = [] {
+        const char* e = std::getenv("NX_DISPLAY_HZ");
+        int hz = e ? std::atoi(e) : 0;
+        if (hz < 30 || hz > 360) return uint64_t(16'666'667);
+        log("vi: display at %d Hz (NX_DISPLAY_HZ)", hz);
+        return uint64_t(1'000'000'000ull / uint64_t(hz));
+    }();
+    return p;
+}
 
 namespace {
 
@@ -47,7 +61,7 @@ void vsync_thread() {
     plat::set_thread_name("vsync");
     uint64_t next = plat::monotonic_ns();
     for (;;) {
-        next += 16'666'667;
+        next += display_period_ns();
         int64_t wait = int64_t(next - plat::monotonic_ns());
         if (wait > 0) plat::sleep_ns(wait);
         g_vsync->signaled = true;

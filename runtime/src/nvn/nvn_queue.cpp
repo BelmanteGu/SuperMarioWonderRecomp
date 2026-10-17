@@ -16,11 +16,20 @@
 #include <string>
 #include <atomic>
 #include <vector>
+#include <map>
+#ifdef __linux__
+#include <dirent.h>
+#include <unistd.h>
+#endif
 
 #include "nvn.h"
 #include "nvn_ultrawide.h"
 #include "platform.h"
 
+namespace nx {
+uint64_t display_period_ns();
+extern std::atomic<uint64_t> g_tick_calls, g_yield_calls, g_sleep_calls;
+}
 namespace nx::nvn {
 
 // Submits the game made and submits whose replay (and GPU work, write-backs) finished. The game records the next frame
@@ -272,6 +281,64 @@ uint32_t governor_max(uint64_t now) {
     return 0;
 }
 
+
+#ifdef __linux__
+// One line per 300 main-thread frames: wall time, CPU seconds used since the last line, % of one core, per thread.
+static void cpu_log_tick() {
+    static int n = 0;
+    static uint64_t wall0 = 0;
+    static std::map<std::string, uint64_t> prev, prev_sys;
+    if (++n % 300) return;
+    uint64_t now = plat::monotonic_ns();
+    std::map<std::string, uint64_t> cur, cur_sys;
+    if (DIR* d = opendir("/proc/self/task")) {
+        while (dirent* e = readdir(d)) {
+            if (e->d_name[0] == '.') continue;
+            char path[96], buf[512];
+            snprintf(path, sizeof path, "/proc/self/task/%s/stat", e->d_name);
+            FILE* f = fopen(path, "r");
+            if (!f) continue;
+            size_t r = fread(buf, 1, sizeof buf - 1, f);
+            fclose(f);
+            buf[r] = 0;
+            char* lp = strchr(buf, '(');
+            char* rp = strrchr(buf, ')');
+            if (!lp || !rp) continue;
+            std::string name(lp + 1, rp);
+            unsigned long ut = 0, st = 0;
+            sscanf(rp + 2, "%*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu", &ut, &st);
+            cur[name + "/" + e->d_name] = ut + st;
+            cur_sys[name + "/" + e->d_name] = st;
+        }
+        closedir(d);
+    }
+    double tick = 1.0 / double(sysconf(_SC_CLK_TCK));
+    double dt = wall0 ? double(now - wall0) / 1e9 : 0;
+    std::string line;
+    double sum = 0;
+    for (auto& [k, v] : cur) {
+        double used = double(v - (prev.count(k) ? prev[k] : 0)) * tick;
+        sum += used;
+        if (dt > 0 && used / dt > 0.03) {
+            char b[96];
+            double sys = double(cur_sys[k] - (prev_sys.count(k) ? prev_sys[k] : 0)) * tick;
+            snprintf(b, sizeof b, " %s=%.0f%%(sys %.0f)", k.substr(0, k.find('/')).c_str(), 100 * used / dt, 100 * sys / dt);
+            line += b;
+        }
+    }
+    static uint64_t pt = 0, py = 0, ps = 0;
+    uint64_t t_ = g_tick_calls, y_ = g_yield_calls, s_ = g_sleep_calls;
+    if (dt > 0) log("cpu: per second: GetSystemTick %.0f, yield %.0f, SleepThread(ns>0) %.0f", double(t_ - pt) / dt, double(y_ - py) / dt, double(s_ - ps) / dt);
+    pt = t_, py = y_, ps = s_;
+    if (dt > 0) log("cpu: %.1f s wall, process %.0f%% of one core (%.2f cores);%s", dt, 100 * sum / dt, sum / dt, line.c_str());
+    prev = cur;
+    prev_sys = cur_sys;
+    wall0 = now;
+}
+#else
+static void cpu_log_tick() {}
+#endif
+
 // Wonder's sead::GameFramework::procFrame_ override (main+e15ec) picks the interval every frame from the main
 // thread's last frame time, fw[0x118] (GetSystemTick ticks from the end of the previous present wait to the end of
 // this frame's calc and draw recording): 2 when it reaches 15.83 ms, locked after 3 slow frames, back to 1 after 15
@@ -307,6 +374,33 @@ void frame_time_probe(CPU& c) {
         if (ld<uint32_t>(c.x[19] + 0x264) > max) st<uint32_t>(c.x[19] + 0x264, max);
         if (int(c.x[1]) > int(max)) c.x[1] = max;
     }
+    // NX_FW_PROBE=1: which words of the framework object count with the frames (study fps-unlock-1710).
+    static const bool fwprobe = std::getenv("NX_FW_PROBE") != nullptr;
+    if (fwprobe) {
+        static uint32_t prev[0xc0] = {};
+        static uint32_t changed[0xc0] = {}, sum[0xc0] = {};
+        static int n = 0;
+        for (int k = 0; k < 0xc0; k++) {
+            uint32_t v = ld<uint32_t>(c.x[19] + 4 * k);
+            if (v != prev[k]) changed[k]++, sum[k] += v - prev[k];
+            prev[k] = v;
+        }
+        if (++n % 300 == 0) {
+            for (int k = 0; k < 0xc0; k++)
+                if (changed[k] > 150 && sum[k] < 100000)
+                    log("fwprobe: fw[0x%x] changed %u/300, sum of deltas %u, now %u", 4 * k, changed[k], sum[k], prev[k]);
+            memset(changed, 0, sizeof changed), memset(sum, 0, sizeof sum);
+        }
+        static uint64_t t0 = 0, ivsum = 0;
+        if (!t0) t0 = plat::monotonic_ns();
+        ivsum += uint32_t(c.x[1]);
+        if (n % 300 == 0)
+            log("fwprobe: %.2f s wall, %d frames, interval sum %llu, step %u", double(plat::monotonic_ns() - t0) / 1e9, n,
+                (unsigned long long)ivsum, ld<uint32_t>(c.x[19] + 0x260));
+    }
+    // NX_CPU_LOG=1: process CPU use per 300 frames, total and by thread (Linux /proc), for the low-end study.
+    static const bool cpulog = std::getenv("NX_CPU_LOG") != nullptr;
+    if (cpulog) cpu_log_tick();
     static uint64_t bins[5] = {}, frames = 0;
     double ms = double(ld<uint64_t>(c.x[19] + 0x118)) / 19200.0;
     // A main-thread frame over 33 ms: what it waited on (PHASE3.md I1), its CPU time, faults and switches since the
@@ -366,7 +460,7 @@ void pace_present(int interval) {
     at2 += interval >= 2;
     if (++presents % 600 == 0)
         log("nvn: %llu of the last 600 presents at interval >= 2", (unsigned long long)at2), at2 = 0, log_wait_sites();
-    uint64_t period = uint64_t(interval) * 16'666'667ull;
+    uint64_t period = uint64_t(interval) * display_period_ns();
     next = (next > now || now - next < period ? next : now) + period;
 }
 

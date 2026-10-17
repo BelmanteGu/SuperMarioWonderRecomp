@@ -93,7 +93,9 @@ static bool spin_naps() {
 // clock reads) and the heat lowers everyone's clocks. A thread asking again within 20 us, 50 times in a row, is
 // spinning: let it sleep 0.5 ms (the loop keeps sub-millisecond precision against a 16.6 ms step).
 // Hades only (spin_naps()): Wonder's job loops read the tick legitimately.
+std::atomic<uint64_t> g_tick_calls{0}, g_yield_calls{0}, g_sleep_calls{0};
 static void hle_get_system_tick(CPU& c) {
+    g_tick_calls.fetch_add(1, std::memory_order_relaxed);
     if (KThread* t = spin_naps() ? t_self : nullptr) {
         uint64_t now = plat::monotonic_ns();
         if (now - t->last_tick_call < 20'000) {
@@ -493,6 +495,7 @@ void svc(CPU& c, uint32_t imm, uint64_t pc) {
         case 0x0B: {  // SleepThread(ns)
             int64_t ns = int64_t(c.x[0]);
             if (ns > 0) {
+                g_sleep_calls.fetch_add(1, std::memory_order_relaxed);
                 plat::sleep_ns(ns);
                 return;
             }
@@ -500,6 +503,7 @@ void svc(CPU& c, uint32_t imm, uint64_t pc) {
             // each yield is a syscall on a real core (the network thread polls a flag this way and burned a whole
             // core, heating the phone). Past 32 yields in a row (each within 2 ms of the last), every yield sleeps
             // 0.5 ms until the thread does something else for a while.
+            g_yield_calls.fetch_add(1, std::memory_order_relaxed);
             KThread* t = t_self;
             uint64_t now = plat::monotonic_ns();
             if (now - t->last_yield > 2'000'000) t->yields = 0;
