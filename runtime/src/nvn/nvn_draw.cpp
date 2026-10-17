@@ -295,6 +295,31 @@ bool draw(VkCommandBuffer cb, const Targets& t, uint32_t mode, bool indexed, con
     }
     // Textures first: an upload or a layout change cannot happen inside the render pass.
     uint32_t gathered = gather_textures(*shaders);
+    {   // NX_DUMP_DRAW_TEXTURES=<fs hash>@<draw>: the images the first such draw samples, snapshotted (frames/00000_c00000NN)
+        static const char* env = std::getenv("NX_DUMP_DRAW_TEXTURES");
+        static int done_count = 0;
+        static bool said = false;
+        if (env && !said && fs) said = true, log("nvn: draw-textures watch %s, first fs %s total %llu", env, fs->hash.c_str(), (unsigned long long)g_stats.total);
+        if (env && done_count < 6 && fs && std::strncmp(env, fs->hash.c_str(), 16) == 0 && env[16] == '@' &&
+            g_stats.total >= std::strtoull(env + 17, nullptr, 10)) {
+            const uint64_t tag = uint64_t(done_count++) << 8;
+            draw_end_rendering(cb, 6);
+            for (size_t k = 0; k < g_textures.resolved.size(); k++) {
+                const ResolvedTexture& r = g_textures.resolved[k];
+                GpuImage* img = r.texture ? image_of(r.texture) : nullptr;
+                log("draw textures %zu: texture %llx image %p %ux%u fmt %d levels %u layers %u uploaded %d rendered %d", k,
+                    (unsigned long long)r.texture, (void*)img, img ? img->width : 0, img ? img->height : 0,
+                    img ? int(img->format) : 0, img ? img->levels : 0, img ? img->layers : 0, img ? int(img->uploaded) : 0,
+                    img ? int(img->rendered) : 0);
+                if (img)
+                    for (uint32_t l = 0; l < (img->layers > 1 ? std::min(img->layers, 12u) : 1u); l++) {
+                        g_snap_layer = l, g_snap_level = 0;
+                        debug_snapshot(cb, *img, 0xC0000000ull + tag * 4096 + k * 16 + l);
+                    }
+                g_snap_layer = 0;
+            }
+        }
+    }
     // A pass that neither tests nor writes depth but keeps its depth image bound while sampling that same image (the
     // world map's depth-to-colour linearization, fs 0aa56d1b): on Metal the image is then attached and read in one
     // encoder, which is undefined, and the copy came out 0 everywhere; the composite then took the player for

@@ -307,7 +307,11 @@ bool pipelined() {
 #if defined(__APPLE__)
         return !e || std::atoi(e) > 0;
 #else
-        return e && std::atoi(e) > 0;
+        // An integrated GPU shares the CPU's memory and is the long side of a frame: with the fences not waited for,
+        // the Intel UHD went from 26.2 to 31.3 fps docked and 37.8 to 40.1 at 720p in the Flower Kingdom intro
+        // (docs/nvn/studies/intel-igpu-1710.md). Pipelined is the default there; NX_PIPELINED=0 turns it off.
+        if (!e) return gpu_is_integrated();
+        return std::atoi(e) > 0;
 #endif
     }();
     return on;

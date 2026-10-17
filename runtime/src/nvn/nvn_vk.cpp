@@ -52,6 +52,8 @@ VkSurfaceTransformFlagBitsKHR g_sc_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT
 VkFormat g_sc_format = VK_FORMAT_B8G8R8A8_UNORM;
 VkSemaphore g_acquired = VK_NULL_HANDLE, g_rendered = VK_NULL_HANDLE;
 VkBool32 g_depth_clip_control = VK_FALSE;
+bool g_integrated = false;
+bool g_require_sg32 = false;  // compute pipelines are made with a required subgroup size of 32 (Maxwell's warp)  // the chosen GPU is an integrated one (unified memory, the GPU is the long side)
 VkPhysicalDeviceFeatures g_features{};  // the core features enabled (vk_features())
 VkDescriptorPool g_descriptors = VK_NULL_HANDLE;
 
@@ -144,6 +146,7 @@ bool init() {
     VkPhysicalDeviceProperties props{};
     p_vkGetPhysicalDeviceProperties(g_physical, &props);
     p_vkGetPhysicalDeviceMemoryProperties(g_physical, &g_memory);
+    g_integrated = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
 
     g_gipa = reinterpret_cast<void*>(gipa);
     if (!make_surface()) return false;
@@ -196,6 +199,19 @@ bool init() {
         *tail = &fport, tail = &fport.pNext;
     }
     p_vkGetPhysicalDeviceFeatures2(g_physical, &features);
+    {   // The translated shaders assume Maxwell's warp of 32 (TRANSLATOR.md). Intel runs subgroups of 8, 16 or 32 as its
+        // compiler chooses; where the size can be pinned (core 1.3 subgroup size control), compute pipelines pin 32.
+        VkPhysicalDeviceSubgroupSizeControlProperties sgc{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES};
+        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        p2.pNext = &sgc;
+        p_vkGetPhysicalDeviceProperties2(g_physical, &p2);
+        const char* e = std::getenv("NX_SUBGROUP32");
+        bool can = f13.subgroupSizeControl && sgc.minSubgroupSize <= 32 && sgc.maxSubgroupSize >= 32 &&
+                   (sgc.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT);
+        g_require_sg32 = can && e && e[0] == '1';  // experimental, off by default: no visible effect on the Intel silhouettes
+        log("nvn/vk: subgroup sizes %u..%u, compute subgroup size %s", sgc.minSubgroupSize, sgc.maxSubgroupSize,
+            g_require_sg32 ? "pinned to 32" : "left to the driver");
+    }
     g_depth_clip_control = fclip.depthClipControl;
     g_features = features.features;
     // NX_ASTC_DECODE=1|linear|srgb: the CPU decoder even where the GPU has ASTC (to compare the two on one GPU).
@@ -382,6 +398,8 @@ VkQueue vk_queue() { return g_queue; }
 uint32_t vk_queue_family() { return g_family; }
 bool vk_depth_clip_control() { return g_depth_clip_control; }
 const VkPhysicalDeviceFeatures& vk_features() { return g_features; }
+bool gpu_is_integrated() { return g_integrated; }
+bool gpu_require_subgroup32() { return g_require_sg32; }
 
 uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want) {
     for (uint32_t k = 0; k < g_memory.memoryTypeCount; k++)

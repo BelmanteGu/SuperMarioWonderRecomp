@@ -87,6 +87,7 @@ endforeach()
 
 set(NX_RUNTIME_SOURCES
     runtime/src/main.cpp
+    runtime/src/sampler.cpp
     runtime/src/loader.cpp
     runtime/src/memory.cpp
     runtime/src/kernel.cpp

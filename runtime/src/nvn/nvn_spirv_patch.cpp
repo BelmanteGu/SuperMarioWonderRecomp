@@ -403,6 +403,74 @@ bool default_unwritten_inputs(const std::vector<uint32_t>& in, uint32_t location
     return true;
 }
 
+// ---- position invariance ----------------------------------------------------------------------------------------
+// The colour pass after a depth pre-pass tests EQUAL against depth another vertex shader wrote (DEBUG-2 #60). Two
+// shaders computing the same position can round differently when the driver contracts or reassociates them
+// differently; Vulkan guarantees equal results only for outputs decorated Invariant. NVIDIA's compiler happens to
+// agree, Mesa ANV (Intel) does not: the characters and the terrain stayed the pre-pass's black (0,0,0,1) on an Intel
+// UHD. Decorating every vertex shader's Position Invariant makes the two passes agree (experimental, NX_INVARIANT=1 turns it on).
+bool make_position_invariant(const std::vector<uint32_t>& in, std::vector<uint32_t>& out) {
+    constexpr uint32_t OpMemberDecorate = 72, DecorationBuiltIn = 11, DecorationInvariant = 18, BuiltInPosition = 0;
+    if (in.size() < 5) return false;
+    out.assign(in.begin(), in.begin() + 5);
+    bool changed = false;
+    for (size_t i = 5; i < in.size();) {
+        uint32_t len = in[i] >> 16, op = in[i] & 0xffff;
+        if (!len || i + len > in.size()) return false;
+        out.insert(out.end(), in.begin() + i, in.begin() + i + len);
+        const uint32_t* w = &in[i];
+        if (op == OpDecorate && len == 4 && w[2] == DecorationBuiltIn && w[3] == BuiltInPosition) {
+            out.insert(out.end(), {(3u << 16) | OpDecorate, w[1], DecorationInvariant});
+            changed = true;
+        } else if (op == OpMemberDecorate && len == 5 && w[3] == DecorationBuiltIn && w[4] == BuiltInPosition) {
+            out.insert(out.end(), {(4u << 16) | OpMemberDecorate, w[1], w[2], DecorationInvariant});
+            changed = true;
+        }
+        i += len;
+    }
+    return changed;
+}
+
+// ---- float controls ---------------------------------------------------------------------------------------------
+// Maxwell shaders keep infinities and NaNs (a min against 1/0, a compare of a NaN), and the translated code relies on it.
+// Vulkan lets a compiler assume finite values unless the shader asks for SignedZeroInfNanPreserve (SPV_KHR_float_controls).
+// NVIDIA's compiler preserves them anyway; Mesa ANV may fold them away (NX_FLOAT_CONTROLS=1 turns this on, 0 off).
+bool preserve_inf_nan(const std::vector<uint32_t>& in, std::vector<uint32_t>& out) {
+    constexpr uint32_t OpCapabilityOp = 17, OpExtensionOp = 10, OpEntryPointOp = 15, OpExecutionModeOp = 16;
+    constexpr uint32_t CapSignedZeroInfNanPreserve = 4466, ModeSignedZeroInfNanPreserve = 4461;
+    if (in.size() < 5) return false;
+    size_t after_cap = 0, after_ext = 0, after_mode = 0;
+    uint32_t entry = 0;
+    for (size_t i = 5; i < in.size();) {
+        uint32_t len = in[i] >> 16, op = in[i] & 0xffff;
+        if (!len || i + len > in.size()) return false;
+        if (op == OpCapabilityOp) after_cap = i + len;
+        else if (op == OpExtensionOp) after_ext = i + len;
+        else if (op == OpEntryPointOp) { if (!entry) entry = in[i + 2]; after_mode = std::max(after_mode, i + len); }
+        else if (op == OpExecutionModeOp) after_mode = std::max(after_mode, i + len);
+        i += len;
+    }
+    if (!entry || !after_cap || !after_mode) return false;
+    if (!after_ext) after_ext = after_cap;  // extensions follow the capabilities
+    // "SPV_KHR_float_controls" as a literal string: 22 characters and a nul, 6 words.
+    const char name[] = "SPV_KHR_float_controls";
+    std::vector<uint32_t> ext((sizeof name + 3) / 4, 0);
+    std::memcpy(ext.data(), name, sizeof name);
+    ext.insert(ext.begin(), (uint32_t(ext.size() + 1) << 16) | OpExtensionOp);
+    const std::vector<uint32_t> cap = {(2u << 16) | OpCapabilityOp, CapSignedZeroInfNanPreserve};
+    const std::vector<uint32_t> mode = {(4u << 16) | OpExecutionModeOp, entry, ModeSignedZeroInfNanPreserve, 32};
+    // The three insertion points in file order: capabilities, extensions, execution modes.
+    size_t p[3] = {after_cap, std::max(after_ext, after_cap), after_mode};
+    out.assign(in.begin(), in.begin() + long(p[0]));
+    out.insert(out.end(), cap.begin(), cap.end());
+    out.insert(out.end(), in.begin() + long(p[0]), in.begin() + long(p[1]));
+    out.insert(out.end(), ext.begin(), ext.end());
+    out.insert(out.end(), in.begin() + long(p[1]), in.begin() + long(p[2]));
+    out.insert(out.end(), mode.begin(), mode.end());
+    out.insert(out.end(), in.begin() + long(p[2]), in.end());
+    return true;
+}
+
 uint32_t unwritten_inputs(const ShaderInfo* vs, const ShaderInfo* fs) {
     uint32_t mask = 0;
     if (!vs || !fs) return 0;
@@ -430,6 +498,16 @@ std::vector<uint32_t> patched_spirv(const ShaderInfo* s, const uint8_t* kinds, u
             ok ? " read (0, 0, 0, 1)" : ", left as they are");
     }
     if (clamp_uniform_indices(code, next, nullptr)) code.swap(next);
+    static const bool invariant = [] {
+        const char* e = std::getenv("NX_INVARIANT");  // off by default: it did not change the Intel silhouettes
+        return e && std::atoi(e) != 0;
+    }();
+    if (invariant && s->stage == ShaderStage::Vertex && make_position_invariant(code, next)) code.swap(next);
+    static const bool fc = [] {
+        const char* e = std::getenv("NX_FLOAT_CONTROLS");
+        return e && std::atoi(e) != 0;
+    }();
+    if (fc && s->stage != ShaderStage::Compute && preserve_inf_nan(code, next)) code.swap(next);
     return code;
 }
 

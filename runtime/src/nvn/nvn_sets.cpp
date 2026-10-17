@@ -246,6 +246,22 @@ bool all_write_backs() {  // NX_WRITE_BACK_ALL=1: every compute storage binding,
     return on;
 }
 
+// Zero padding after bound data (4 KB for uniform blocks, 64 KB for dynamically indexed ones and storage buffers) exists
+// because Metal does not bound-check. Where the GPU has robustBufferAccess (Vulkan on Intel, NVIDIA, Adreno: every
+// device but MoltenVK) a read past a binding's range returns 0 by itself, so the padding is pure CPU cost (a memset
+// and a copy of up to 64 KB per unique block: ~6 MB per frame in gameplay on the Intel iGPU, 30% of the replay thread).
+// NX_PAD_BUFFERS=1 brings the padding back (bisecting); Apple always pads.
+uint64_t pad_min(uint64_t want) {
+    static const bool pad = [] {
+#if defined(__APPLE__)
+        return true;
+#else
+        return std::getenv("NX_PAD_BUFFERS") != nullptr || !vk_features().robustBufferAccess;
+#endif
+    }();
+    return pad ? want : 16;
+}
+
 // guest: the bytes are guest memory (a copy is shared by later draws of the submit); host scratch data (the support
 // buffer, c[0]: on the stack, at the same address for every draw) is copied every time (docs/nvn/DEBUG.md #30).
 VkDescriptorBufferInfo buffer_of(VkCommandBuffer cb, const void* bytes, uint64_t size, uint64_t min_size = 16,
@@ -461,8 +477,27 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
                     // of a 0x90-byte block and wrote Inf): the bound data goes in a zero-padded 4 KB at least.
                     // Banks the shader indexes with a computed value (clamped to 64 KB, nvn_spirv_patch.cpp): all
                     // 64 KB, so every read past the data returns 0 as on Maxwell.
+                    if (static const bool tr8 = std::getenv("NX_TRACE_C8") != nullptr; tr8 && s->stage == ShaderStage::Fragment && b.nvn.index == 5 && p) {
+                        static int shown = 0;
+                        if (shown++ % 5000 == 0) {  // tile light counts of the uber shaders' c8: word at 8196 + tile * 256
+                            const uint32_t* w = reinterpret_cast<const uint32_t*>(p);
+                            std::string line;
+                            uint32_t nonzero = 0;
+                            for (uint32_t t = 0; t < 144 && (8196 + t * 256 + 4) <= r.size; t++) {
+                                uint32_t c = w[(8196 + t * 256) / 4];
+                                nonzero += c != 0;
+                                if (t < 24) line += " " + std::to_string(c);
+                            }
+                            uint64_t nz = 0, first = UINT64_MAX;
+                            for (uint64_t k = 0; k < r.size / 4; k++)
+                                if (w[k]) nz++, first = std::min<uint64_t>(first, k);
+                            log("c8 @%llx: fs %s size %llu overlaps_written %d tiles with lights %u; nonzero words %llu first at %lld; counts:%s",
+                                (unsigned long long)r.address, s->hash.c_str(), (unsigned long long)r.size, int(written_overlaps(p, r.size)), nonzero,
+                                (unsigned long long)nz, (long long)first, line.c_str());
+                        }
+                    }
                     bool indexed = b.set == 0 && b.binding < 64 && (dynamic_uniform_bindings(s) >> b.binding & 1);
-                    info = buffer_of(cb, p, p ? std::min<uint64_t>(r.size, 0x10000) : 0, indexed ? 0x10000 : 0x1000);
+                    info = buffer_of(cb, p, p ? std::min<uint64_t>(r.size, 0x10000) : 0, pad_min(indexed ? 0x10000 : 0x1000));
                     break;
                 }
                 case NvnSource::StorageBuffer: {
@@ -472,7 +507,7 @@ void build_sets(VkCommandBuffer cb, const std::vector<const ShaderInfo*>& shader
                     if (!written && s->stage != ShaderStage::Compute && written_overlaps(p, size)) written_count_bind();
                     // At least 64 KB: Metal does not bound-check, and a shader writing past a small or missing
                     // buffer overwrote the next data in the upload buffer (garbage everywhere after a compute).
-                    info = buffer_of(cb, p, size, 0x10000, written);
+                    info = buffer_of(cb, p, size, written ? 0x10000 : pad_min(0x10000), written);
                     break;
                 }
                 case NvnSource::DriverConstants: {
