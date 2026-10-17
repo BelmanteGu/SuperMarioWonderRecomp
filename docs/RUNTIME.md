@@ -46,7 +46,7 @@ What rtld's `_start` does on Horizon, reverse engineered from `rtld`:
 
 Guest pointers are host pointers. Fixed ranges are reserved at startup and committed on demand:
 
-| Range (Windows, Android) | Range (macOS) | Use |
+| Range (Windows, Android) | Preferred range (macOS) | Use |
 |---|---|---|
 | `0x40_0000_0000` | `0x3_0000_0000` | modules (`NX_BASE`; `sdk` at +0x1000_0000) |
 | `0x50_0000_0000` | `0x4_0000_0000` | heap (svcSetHeapSize), up to 6 GiB |
@@ -55,12 +55,23 @@ Guest pointers are host pointers. Fixed ranges are reserved at startup and commi
 | `0x6A_0000_0000` | `0xB_0000_0000` | kernel allocations: TLS pages, main stack, shared memory |
 | `0x6F_0000_0000` | `0xE_0000_0000` | HLE thunk addresses (never mapped; `nx::call` dispatches them) |
 
-macOS on Apple silicon refuses fixed mappings between `0x10_0000_0000` and `0x6F_FFFF_FFFF` (measured on macOS
-14.3: `mmap(MAP_FIXED)` returns ENOMEM there; `0x2_0000_0000..0xF_FFFF_FFFF` and `0x70_0000_0000` up are free), and
-the dyld shared cache (every system framework, loaded with SDL3) sits at `0x1_8000_0000` up to `0x3_0000_0000`.
-The macOS layout stays below 2^36, inside Horizon's 39-bit application address space. The recompiler emits each
-module's `NXB` as `NX_BASE + offset` (`--base` is measured in the reference layout), so the same generated code
-builds for every host. Apple silicon pages are 16 KiB: commits round out to them.
+Those macOS addresses were measured on macOS 14.3. On an M4 with macOS 27.0.1, the shared-cache reservation extends
+past the entire preferred layout, so reserving the modules at `0x3_0000_0000` fails before boot. Host malloc also
+fragments the upper address window differently between launches.
+
+`mac_address_space.cpp` first tries the preferred layout, then reserves free gaps without overwriting any host
+mapping (`mach_vm_map`, `VM_FLAGS_FIXED` without `VM_FLAGS_OVERWRITE`). The fallback places the modules in a free
+low gap and the heap, alias, stacks and kernel in free gaps between `0x70_0000_0000` and `0x80_0000_0000`. It tries
+different heap placements and an 8 GiB alias region if 16 GiB cannot fit. The chosen size is advertised to the game
+through the existing `svcGetInfo` path. Every range stays inside Horizon's 39-bit address space.
+
+The layout is initialized on first use, before generated module tables capture `NX_BASE`; recompiled functions use
+the same immutable layout. The recompiler still emits `NXB` as `NX_BASE + offset` (`--base` is measured in
+the reference layout). Jump tables dispatch on the target minus the module base, leaving case labels constant.
+Regenerate both modules when adopting this change: older generated jump tables put `NXB` in their case labels and
+cannot compile with a runtime-selected base. `mac_address_space_test` loads SDL and checks initialization order,
+non-overlap, 39-bit bounds and writable commits without game data. Apple silicon pages are 16 KiB: commits round
+out to them.
 
 `svcQueryMemory` is answered from a Horizon-style memory map (`vm_set`/`vm_query`).
 `svcMapMemory` copies instead of aliasing: the source is inaccessible while mapped on Horizon, so a copy on

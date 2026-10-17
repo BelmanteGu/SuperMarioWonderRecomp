@@ -95,6 +95,7 @@ PadState g_pad;
 
 // No MAP_FIXED_NOREPLACE on Darwin: ask for the address as a hint and give it back if the kernel chose another.
 bool reserve(uint64_t addr, uint64_t size) {
+    if (mac_address_reserved(addr, size)) return true;
     void* p = mmap(reinterpret_cast<void*>(addr), size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
     if (p == MAP_FAILED) return false;
     if (uint64_t(p) != addr) {

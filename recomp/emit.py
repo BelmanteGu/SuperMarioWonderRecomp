@@ -276,7 +276,10 @@ class Emitter(ExtOps, VecLdSt, IntOps, FpOps, NeonOps, NeonWideOps):
             out.append("        js_[jr_].restore(c); c.x[0] = e_.val ? e_.val : 1;")
             out.append("    } }")
         out.append("}")
-        return "\n".join(out)
+        # Darwin may select the load address at startup. Capture it once per function, rather than expanding the
+        # guarded layout accessor at every guest ADR/ADRP, branch and return address.
+        return "\n".join([out[0], f"    const uint64_t module_base_ = {B};"] +
+                         [line.replace(B, "module_base_") for line in out[1:]])
 
     # ---- instruction dispatch -----------------------------------------------------------------------------
 
@@ -314,10 +317,10 @@ class Emitter(ExtOps, VecLdSt, IntOps, FpOps, NeonOps, NeonWideOps):
     def i_br(self, f, i, ops, jt):
         r = self.regop(i, ops[0])
         if i.address in jt:
-            cases = " ".join(f"case {B} + {t:#x}ull: goto L_{t:X};" for t in jt[i.address])
+            cases = " ".join(f"case {t:#x}ull: goto L_{t:X};" for t in jt[i.address])
             for t in jt[i.address]:
                 self.labels.add(t)
-            return f"switch ({r.r()}) {{ {cases} default: nx::call(c, {r.r()}); return; }}"
+            return f"switch ({r.r()} - {B}) {{ {cases} default: nx::call(c, {r.r()}); return; }}"
         return f"{{ nx::call(c, {r.r()}); return; }}"
 
     def i_ret(self, f, i, ops):

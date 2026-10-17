@@ -21,19 +21,24 @@ extern bool g_trace;  // verbose tracing (NX_TRACE=1)
 
 constexpr uint64_t kAddressSpaceBase = 0x0008000000ull;
 constexpr uint64_t kAddressSpaceSize = 0x7FF8000000ull;  // 39-bit, like an application on Horizon
-constexpr uint64_t kModuleBase = NX_BASE;  // main; sdk at +0x10000000 (NX_BASE, nx/cpu.h)
+#if defined(__APPLE__)
+inline const uint64_t kModuleBase = NX_BASE;
+#else
+constexpr uint64_t kModuleBase = NX_BASE;
+#endif
+// main at kModuleBase; sdk at +0x10000000 (NX_BASE, nx/cpu.h).
 constexpr uint64_t kHeapMax = 0x180000000ull;  // 6 GiB
 constexpr uint64_t kStackSize = 0x100000000ull;
 constexpr uint64_t kKernelSize = 0x100000000ull;
 constexpr uint64_t kThunkSize = 0x100000ull;
 #if defined(__APPLE__)
-// macOS: only 0x3_0000_0000..0xF_FFFF_FFFF is free below 0x70_0000_0000 (see NX_BASE).
-constexpr uint64_t kHeapBase = 0x400000000ull;
-constexpr uint64_t kAliasBase = 0x600000000ull;
-constexpr uint64_t kAliasSize = 0x400000000ull;
-constexpr uint64_t kStackBase = 0xA00000000ull;
-constexpr uint64_t kKernelBase = 0xB00000000ull;
-constexpr uint64_t kThunkBase = 0xE00000000ull;
+// The macOS layout is reserved before these and the generated module tables initialize.
+inline const uint64_t kHeapBase = mac_address_space().heap;
+inline const uint64_t kAliasBase = mac_address_space().alias;
+inline const uint64_t kAliasSize = mac_address_space().alias_size;
+inline const uint64_t kStackBase = mac_address_space().stack;
+inline const uint64_t kKernelBase = mac_address_space().kernel;
+inline const uint64_t kThunkBase = mac_address_space().thunks;
 #else
 constexpr uint64_t kHeapBase = 0x5000000000ull;
 #if defined(__ANDROID__)

@@ -15,13 +15,14 @@
 #include <intrin.h>
 #endif
 
-// Where the modules are mapped. macOS on Apple silicon keeps 0x10_0000_0000..0x6F_FFFF_FFFF for itself (fixed
-// mappings there fail) and puts the dyld shared cache at 0x1_8000_0000..0x3_0000_0000, so the guest address space
-// moves to 0x3_0000_0000..0xF_FFFF_FFFF there, still inside Horizon's 39 bits. Generated code adds each module's
-// offset to this.
+// Generated code adds each module's offset to this. Darwin selects and reserves a layout before the generated
+// module tables initialize: newer shared caches occupy the old 0x3_0000_0000 module address.
+#if defined(__APPLE__)
+#include <nx/mac_address_space.h>
+#endif
 #ifndef NX_BASE
 #if defined(__APPLE__)
-#define NX_BASE 0x0000000300000000ull
+#define NX_BASE (nx::mac_address_space().modules)
 #else
 #define NX_BASE 0x0000004000000000ull
 #endif
