@@ -3,6 +3,7 @@
 // is blitted to RGBA8 first, so float and packed formats come out as the GPU would display them (clamped to 0..1).
 // Runs under the GPU lock, after the frame's work completed, on its own command buffer.
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -378,7 +379,7 @@ void gpu_profile_log(uint64_t frames) {
     double total = 0;
     for (auto& e : v) total += e.first;
     log("gpu profile: %8.2f ms/frame in all, %zu labels", total / double(frames), v.size());
-    for (size_t k = 0; k < v.size() && k < 10; k++)
+    for (size_t k = 0; k < v.size() && k < 40; k++)
         log("gpu profile: %8.2f ms/frame  %s (%llu passes)", v[k].first / double(frames), v[k].second.c_str(),
             (unsigned long long)g_totals[v[k].second].second);
     g_totals.clear();
@@ -416,6 +417,8 @@ bool debug_snap_wanted(uint64_t draw) {
     return std::find(list.begin(), list.end(), draw) != list.end();
 }
 
+uint32_t g_snap_layer = 0, g_snap_level = 0;  // which layer and level the next debug_snapshot reads (nvn_draw.cpp)
+
 void debug_snapshot(VkCommandBuffer cb, GpuImage& img, uint64_t draw) {
     if (!img.image || !(img.aspect & VK_IMAGE_ASPECT_COLOR_BIT)) return;
     Snap snap;
@@ -432,7 +435,9 @@ void debug_snapshot(VkCommandBuffer cb, GpuImage& img, uint64_t draw) {
         snap.w = std::max(1u, std::min(uint32_t(crop[2] * img.width), img.width - uint32_t(x0)));
         snap.h = std::max(1u, std::min(uint32_t(crop[3] * img.height), img.height - uint32_t(y0)));
     }
-    if (!make_scratch(snap.s, snap.w, snap.h)) {
+    static const bool raw_early = std::getenv("NX_SNAP_RAW") != nullptr;
+    const bool wide = raw_early && img.format == VK_FORMAT_R16G16B16A16_SFLOAT;  // 8-byte texels: a buffer twice as wide
+    if (!make_scratch(snap.s, snap.w * (wide ? 2 : 1), snap.h)) {
         snap.s.destroy(vk_device());
         return;
     }
@@ -442,7 +447,7 @@ void debug_snapshot(VkCommandBuffer cb, GpuImage& img, uint64_t draw) {
     // height, VkFormat, then the texels): an RGBA8 blit rounds small floats to 0..2.
     static const bool raw = std::getenv("NX_SNAP_RAW") != nullptr;
     if (raw && (img.format == VK_FORMAT_R32_SFLOAT || img.format == VK_FORMAT_R16G16_SFLOAT ||
-                img.format == VK_FORMAT_R32_UINT || img.format == VK_FORMAT_R8G8B8A8_UNORM)) {
+                img.format == VK_FORMAT_R32_UINT || img.format == VK_FORMAT_R8G8B8A8_UNORM || wide)) {
         VkBufferImageCopy r{};
         r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         r.imageOffset = {x0, y0, 0};
@@ -458,10 +463,10 @@ void debug_snapshot(VkCommandBuffer cb, GpuImage& img, uint64_t draw) {
     dst.format = VK_FORMAT_R8G8B8A8_UNORM;
     transition(cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     VkImageBlit blit{};
-    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, std::min(g_snap_level, img.levels - 1), std::min(g_snap_layer, img.layers - 1), 1};
     blit.srcOffsets[0] = {x0, y0, 0};
     blit.srcOffsets[1] = {x0 + int32_t(snap.w), y0 + int32_t(snap.h), 1};
-    blit.dstSubresource = blit.srcSubresource;
+    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     blit.dstOffsets[1] = {int32_t(snap.w), int32_t(snap.h), 1};
     p_vkCmdBlitImage(cb, img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, snap.s.image,
                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_NEAREST);
@@ -479,7 +484,21 @@ bool debug_snapshots_pending() { return !g_snaps.empty(); }
 void debug_snapshots_write() {  // after the submit's fence
     for (Snap& snap : g_snaps) {
         void* p = nullptr;
-        if (snap.raw_format && p_vkMapMemory(vk_device(), snap.s.buffer_memory, 0, VK_WHOLE_SIZE, 0, &p) == VK_SUCCESS) {
+        if (snap.raw_format == VK_FORMAT_R16G16B16A16_SFLOAT &&
+            p_vkMapMemory(vk_device(), snap.s.buffer_memory, 0, VK_WHOLE_SIZE, 0, &p) == VK_SUCCESS) {
+            // RGBA16F: how many texels hold NaN or Inf (NX_SNAP_RAW + NX_DUMP_DRAW_TEXTURES), and the largest finite value
+            const uint16_t* h = static_cast<const uint16_t*>(p);
+            uint64_t nan = 0, inf = 0, n = uint64_t(snap.w) * snap.h * 4;
+            float big = 0;
+            for (uint64_t k = 0; k < n; k++) {
+                uint32_t e = h[k] >> 10 & 31, m = h[k] & 1023;
+                if (e == 31) (m ? nan : inf)++;
+                else big = std::max(big, std::ldexp(float(1024 + m), int(e) - 25) * (e ? 1.0f : 0.0f));
+            }
+            log("snapshot %llx: %ux%u rgba16f, %llu NaN, %llu Inf of %llu values, largest finite %g", (unsigned long long)snap.draw, snap.w,
+                snap.h, (unsigned long long)nan, (unsigned long long)inf, (unsigned long long)n, big);
+            p_vkUnmapMemory(vk_device(), snap.s.buffer_memory);
+        } else if (snap.raw_format && p_vkMapMemory(vk_device(), snap.s.buffer_memory, 0, VK_WHOLE_SIZE, 0, &p) == VK_SUCCESS) {
             char name[64];
             std::snprintf(name, sizeof name, "/frames/00000_%llx.raw", (unsigned long long)snap.draw);
             if (FILE* f = plat::fopen_utf8(plat::data_root() + name, "wb")) {

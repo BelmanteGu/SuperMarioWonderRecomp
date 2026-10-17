@@ -86,6 +86,22 @@ bool trace_nan_on() {
 }  // namespace
 
 void trace_nan_dispatch(const ShaderInfo* cs) {
+    static const bool c8 = std::getenv("NX_TRACE_C8") != nullptr;  // each compute dispatch's storage ranges (and uniform c3..)
+    static int dispatches = 0;
+    static std::map<std::string, uint64_t> seen;
+    if (c8 && seen[cs->hash]++ == 0)
+        log("dispatch: first use of cs %s at dispatch %d, frame %llu", cs->hash.c_str(), dispatches, (unsigned long long)g_frame.load());
+    if (c8 && dispatches++ < 0) {
+        std::string r;
+        for (int k = 0; k < 16; k++)
+            if (g_state.storage[5][k].address) {
+                char b[64];
+                std::snprintf(b, sizeof b, " s%d=%llx+%llu", k, (unsigned long long)g_state.storage[5][k].address,
+                              (unsigned long long)g_state.storage[5][k].size);
+                r += b;
+            }
+        log("dispatch %d: cs %s%s", dispatches, cs->hash.c_str(), r.c_str());
+    }
     if (!trace_nan_on()) return;
     for (const Range& r : g_state.storage[5])
         if (r.address) g_nan_writers[reinterpret_cast<uintptr_t>(guest_bytes(r.address))] = cs->hash;

@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+# usage: nansan.py in.spv out.spv   env NANSAN=FDiv,InverseSqrt,... : NaN results of those scalar float ops become NANVAL (default 0)
+import subprocess,sys,re,os
+src,dst=sys.argv[1],sys.argv[2]
+hsh=sys.argv[3] if len(sys.argv)>3 else ""
+only=os.environ.get("NANHASH")
+lo,hi=[int(x) for x in os.environ.get("NANRANGE","0-100000").split("-")]
+dis=subprocess.run(["spirv-dis",src],capture_output=True,text=True).stdout
+ops=set(os.environ.get("NANSAN","FDiv").split(","))
+val=os.environ.get("NANVAL","0")
+if "OpEntryPoint Fragment" not in dis or (only and hsh not in only.split(",")):
+    open(dst,"wb").write(open(src,"rb").read()); sys.exit(0)
+lines=dis.split("\n")
+ft=bt=None
+for l in lines:
+    m=re.match(r"\s*(%\w+) = OpTypeFloat 32\s*$",l)
+    if m: ft=m.group(1)
+    m=re.match(r"\s*(%\w+) = OpTypeBool\s*$",l)
+    if m: bt=m.group(1)
+out=[]; n=0; placed=False; fcount=-1
+for l in lines:
+    if not placed and re.match(r"\s*(%\w+ = )?OpFunction ",l):
+        placed=True
+        if not bt: out.append("%9000001 = OpTypeBool"); bt="%9000001"
+        out.append("%9000002 = OpConstant "+ft+" "+val)
+        out.append("%9000003 = OpTypeVector "+bt+" 4")
+        v4=None
+        for l2 in lines:
+            m3=re.match(r"\s*(%\w+) = OpTypeVector "+re.escape(ft)+r" 4\s*$",l2)
+            if m3: v4=m3.group(1)
+        out.append("%9000004 = OpConstantNull "+v4)
+    m=re.match(r"\s*(%\w+) = (OpFDiv|OpFMul|OpFAdd|OpFSub|OpExtInst %\w+ %\w+) ?(\w*)",l)
+    done=False
+    if placed:
+        if re.match(r"\s*%\w+ = OpExtInst "+re.escape(ft)+r" %\w+ Fma ",l): fcount+=1
+        m1=re.match(r"(\s*)(%\w+) = OpFDiv "+re.escape(ft)+r" (.*)$",l)
+        m2=re.match(r"(\s*)(%\w+) = OpExtInst "+re.escape(ft)+r" (%\w+) (\w+) (.*)$",l)
+        m3=re.match(r"(\s*)(%\w+) = (OpImageSample\w+|OpImageFetch|OpImageRead|OpImageGather) ("+re.escape(v4 or "%none")+r") (.*)$",l)
+        if m3 and "Sample" in ops:
+            n+=1; r=m3.group(2)
+            out.append(f"{r}_raw{n} = {m3.group(3)} {m3.group(4)} {m3.group(5)}")
+            out.append(f"{r}_nan{n} = OpIsNan %9000003 {r}_raw{n}")
+            out.append(f"{r} = OpSelect {m3.group(4)} {r}_nan{n} %9000004 {r}_raw{n}"); done=True
+        elif m1 and "FDiv" in ops:
+            n+=1; r=m1.group(2)
+            out.append(f"{r}_raw{n} = OpFDiv {ft} {m1.group(3)}")
+            out.append(f"{r}_nan{n} = OpIsNan {bt} {r}_raw{n}")
+            out.append(f"{r} = OpSelect {ft} {r}_nan{n} %9000002 {r}_raw{n}"); done=True
+        elif m2 and m2.group(4) in ops and lo <= fcount < hi:
+            n+=1; r=m2.group(2)
+            out.append(f"{r}_raw{n} = OpExtInst {ft} {m2.group(3)} {m2.group(4)} {m2.group(5)}")
+            out.append(f"{r}_nan{n} = OpIsNan {bt} {r}_raw{n}")
+            out.append(f"{r} = OpSelect {ft} {r}_nan{n} %9000002 {r}_raw{n}"); done=True
+    if not done: out.append(l)
+open(dst+".txt","w").write("\n".join(out))
+r=subprocess.run(["spirv-as","--target-env","spv1.3",dst+".txt","-o",dst],capture_output=True,text=True)
+if r.returncode: sys.stderr.write(r.stderr); open(dst,"wb").write(open(src,"rb").read())
+os.remove(dst+".txt")

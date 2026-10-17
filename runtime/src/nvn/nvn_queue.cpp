@@ -28,6 +28,22 @@ namespace nx::nvn {
 // vertex and uniform data while this one is still read (the horizon band, exploded meshes, DEBUG.md #59).
 // NX_SYNC_LOOSE=1: the old behaviour (fences passed at once).
 namespace {
+// NX_TRACE_TIMELINE=<present>: from that present on, the queue events (submit, replay, sync wait, present) of 8 frames
+// with their times and threads are logged (where a frame's wall clock goes).
+struct TlEvent { uint64_t ns; int64_t tid; const char* what; uint64_t arg; };
+TlEvent g_tl[2048];
+std::atomic<uint64_t> g_tl_n{0}, g_presents{0};
+uint64_t g_tl_from = UINT64_MAX;
+void tl(const char* what, uint64_t arg = 0) {
+    static const bool init = [] {
+        if (const char* e = std::getenv("NX_TRACE_TIMELINE")) g_tl_from = uint64_t(std::atoll(e));
+        return true;
+    }();
+    (void)init;
+    if (g_tl_from == UINT64_MAX || g_presents < g_tl_from) return;
+    uint64_t n = g_tl_n.fetch_add(1);
+    if (n < 2048) g_tl[n] = {plat::monotonic_ns(), plat::current_thread_id(), what, arg};
+}
 std::mutex g_sub_lock;
 std::condition_variable g_sub_cv;
 uint64_t g_sub_called = 0, g_sub_done = 0;
@@ -117,15 +133,16 @@ void signal_sync(uint64_t guest) {
 // for whatever the timeout, 2 s at most (then the GPU hung and the process ends). Correct results before latency.
 void SyncWait(CPU& c) {
     auto* s = get<Sync>(c.x[0]);
+    tl("syncwait>");
     if (s) wait_submits(s->seq.load(), kWaitSync);
     if (s) worker_wait(s->job);
+    tl("syncwait<");
     if (uint64_t serial = s ? s->serial.load() : 0) gpu_wait(serial);
     c.x[0] = 0;
 }
 
 // ---- queues -----------------------------------------------------------------------------------------------------
 
-std::atomic<uint64_t> g_presents{0};
 
 void QueueInitialize(CPU& c) { c.x[0] = 1; }  // NVNboolean (NVNqueue*, const NVNqueueBuilder*)
 void QueueFinalize(CPU&) {}
@@ -155,8 +172,11 @@ void QueueSubmitCommands(CPU& c) {  // (NVNqueue*, int count, const NVNcommandHa
         std::lock_guard lk(g_sub_lock);
         g_sub_called++;
     }
+    tl("submit-call");
     worker_run([lists = std::move(lists), deferred] {
+        tl("replay>");
         gpu_submit(lists, deferred);
+        tl("replay<");
         submit_done();
     });
 }
@@ -373,6 +393,7 @@ void QueuePresentTexture(CPU& c) {
     // The frame's work, from the end of the last present's pacing to now (perf_hint.cpp: ADPF on Android).
     static uint64_t work_from = 0;
     uint64_t t_in = plat::monotonic_ns();
+    tl("present>");
     plat::perf_hint_thread();
     if (work_from) plat::perf_hint_frame(int64_t(t_in - work_from));
     if (auto* w = get<Window>(c.x[1])) {
@@ -390,6 +411,13 @@ void QueuePresentTexture(CPU& c) {
     }
     work_from = plat::monotonic_ns();
     uint64_t n = ++g_presents;
+    tl("present<", n);
+    if (g_tl_from != UINT64_MAX && n == g_tl_from + 8) {
+        uint64_t cnt = std::min<uint64_t>(g_tl_n.load(), 2048), t0 = g_tl[0].ns;
+        for (uint64_t k = 0; k < cnt; k++)
+            log("timeline: %9.3f ms  t%lld  %s %llu", double(g_tl[k].ns - t0) / 1e6, (long long)g_tl[k].tid, g_tl[k].what,
+                (unsigned long long)g_tl[k].arg);
+    }
     if (n == 1 || (n & (n - 1)) == 0) log("nvn: present #%llu (texture %d)", (unsigned long long)n, int(c.x[2]));
     g_frame++;
 }
