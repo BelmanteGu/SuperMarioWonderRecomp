@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -424,7 +425,7 @@ static void write_meminfo(uint64_t p, const VmInfo& v) {
     st<uint32_t>(p + 36, 0);
 }
 
-void svc(CPU& c, uint32_t imm, uint64_t pc) {
+static void svc_impl(CPU& c, uint32_t imm, uint64_t pc) {
     if (g_trace) log("svc %#x from %s", imm, describe(pc).c_str());
     uint32_t rc = 0;
     switch (imm) {
@@ -682,6 +683,52 @@ void svc(CPU& c, uint32_t imm, uint64_t pc) {
             rc = 0;
     }
     c.x[0] = rc;
+}
+
+
+// NX_SVC_PROFILE=1: wall time of the game main thread's kernel calls that took 30 us or more, by call and caller,
+// logged every 600 frames (where the main thread sleeps: job barriers, mutexes, waits on the replay).
+namespace {
+thread_local int t_svc_role = 0;  // 1 game main, 2 the thread that presents
+std::mutex g_svc_lock;
+std::map<std::tuple<int, uint32_t, uint64_t>, std::pair<uint64_t, uint64_t>> g_svc_prof;  // (role, svc, pc) -> (ns, calls)
+bool svc_profile_on() {
+    static const bool on = std::getenv("NX_SVC_PROFILE") != nullptr;
+    return on;
+}
+}  // namespace
+
+void svc_profile_mark(int role) { t_svc_role = role; }
+
+void svc_profile_report(uint64_t frames, int role) {
+    if (!svc_profile_on()) return;
+    std::lock_guard lk(g_svc_lock);
+    std::vector<std::pair<uint64_t, std::tuple<int, uint32_t, uint64_t>>> v;
+    uint64_t total = 0;
+    for (auto& [k, val] : g_svc_prof)
+        if (std::get<0>(k) == role) v.push_back({val.first, k}), total += val.first;
+    std::sort(v.rbegin(), v.rend());
+    log("svc profile: role %d thread blocked %.2f ms per frame in calls over 30 us (over %llu frames)", role,
+        double(total) / 1e6 / double(frames), (unsigned long long)frames);
+    for (size_t i = 0; i < v.size() && i < 8; i++) {
+        auto& val = g_svc_prof[v[i].second];
+        log("svc profile: role %d: %.2f ms/frame, %.1f calls/frame: svc %#x from %s", role, double(val.first) / 1e6 / double(frames),
+            double(val.second) / double(frames), std::get<1>(v[i].second), describe(std::get<2>(v[i].second)).c_str());
+    }
+    for (auto it = g_svc_prof.begin(); it != g_svc_prof.end();)
+        it = std::get<0>(it->first) == role ? g_svc_prof.erase(it) : std::next(it);
+}
+
+void svc(CPU& c, uint32_t imm, uint64_t pc) {
+    if (!t_svc_role || !svc_profile_on()) return svc_impl(c, imm, pc);
+    uint64_t t0 = plat::monotonic_ns();
+    svc_impl(c, imm, pc);
+    uint64_t dt = plat::monotonic_ns() - t0;
+    if (dt >= 30000) {
+        std::lock_guard lk(g_svc_lock);
+        auto& e = g_svc_prof[{t_svc_role, imm, pc}];
+        e.first += dt, e.second++;
+    }
 }
 
 }  // namespace nx

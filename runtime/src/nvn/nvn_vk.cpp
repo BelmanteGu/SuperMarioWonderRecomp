@@ -147,6 +147,10 @@ bool init() {
     p_vkGetPhysicalDeviceProperties(g_physical, &props);
     p_vkGetPhysicalDeviceMemoryProperties(g_physical, &g_memory);
     g_integrated = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+    // An integrated GPU shares the package's power budget with the CPU: ask the desktop for its performance profile
+    // (NX_POWER_PROFILE=1: also with a discrete GPU; 0: never). frame_stats.cpp.
+    if (g_integrated || (std::getenv("NX_POWER_PROFILE") && std::getenv("NX_POWER_PROFILE")[0] == '1'))
+        plat::request_performance_profile();
 
     g_gipa = reinterpret_cast<void*>(gipa);
     if (!make_surface()) return false;

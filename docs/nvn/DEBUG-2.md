@@ -481,3 +481,30 @@ GitHub (issues #43-#48): the glitches in the user's recording of course 1-1 (`do
       before. Diagnosis tool: `NX_FRAME_SIG` (per-frame draw signature, `nvn_draw_trace.cpp`) and
       `tools/find_haze_flicker.py`.
     - Check: the owner's play after the fix: no haze flicker. Formal recordings still to do.
+
+93. **Windows: crash after the character select (#5, null read at 0x150, `main+91f464`): not reproduced; what is known.**
+    - Symptom (issue #5, Windows 11, clang-cl 23, RTX 5070 Ti): a guest thread crashes with a read of 0x150 about a
+      second after a character is chosen, right after four small `WriteTexels` and `ICommonStateGetter cmd 66`.
+    - What the crash is (read from the recompiled code, `private/wonder/gen`, and checked on Linux): `main+91f40c` is
+      the "load parameters" method of a *rail* object (it reads `IsEntity`, `StartEdgeType`, `EndEdgeType` from the
+      rail's BYML node, `main+452530` taking the default from `[object+8]->+0x150` when the key is missing). The
+      caller is the stage loader's area function (`main+1abf28`: `Actors`, `Rails`, `ActorToRailLinks` of an area's
+      `BancMapUnit/*.bcett.byml`); it creates the rail from a 15-entry class table (`main+347d748`, index 6 here) and
+      stores in `[rail+8]` the resource it finds by path (`main+39d70`, `Gyml/Rail/RailParam/<type>.game__rail__RailParam.bgyml`).
+      The crash is that `[rail+8]` is null: the rail's parameter resource was not found/loaded.
+    - Not reproduced on Linux. The same point (four `WriteTexels`, then `cmd 66`, then the area loader on the same
+      thread, stack `68bdc3...` as in the report) runs without a crash for new and for continued saves, for several
+      characters (Blue Toad, Red Yoshi), with one CPU, with the world map and course 1-1 loaded after it (their rails
+      load `WorldMapRoute`, `NextGoTo`, `Default`, `SectionFrame` fine). In the opening stage (Course900) the area
+      loader finds no `Rails` key at all (checked in its four `bcett` files), so the report's thread reached a
+      rail that this run never meets: it loaded a stage that has rails, or read a different `Rails` list.
+    - Not the cause (checked): `ICommonStateGetter` cmd 66 is `SetCpuBoostMode` (input only, no output; the stub
+      answered it correctly), huge or short file reads (no read over 1 TB in a run), directory order (the game
+      opens no directory), RomFS names (no Windows-reserved or case-colliding names), the thread core numbers,
+      saves (new, second run and progressed saves).
+    - Changes: cmd 66 is answered explicitly (no more log line). Every crash report (Windows, Linux, macOS, Android)
+      now ends with `last file opens`: the last 24 `OpenFile`/`OpenDirectory` of any thread, with the host thread id
+      and the result (ok, not found, the host could not open it). That names the stage and the resource that was
+      loading. `NX_TRACE_FS=1` also logs `OpenDirectory` and host open failures (with errno).
+    - To close it: the reporter's `CRASH` block now shows which stage was loading; with `NX_TRACE_FS=1` the lines
+      `not found` / `failed to open on the host` before it tell which rail resource is missing on that machine.

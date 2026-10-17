@@ -19,6 +19,13 @@
 
 #include "platform.h"
 
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/types.h>
+#include <unistd.h>
+extern char** environ;
+#endif
 #if defined(__ANDROID__)
 #include <dlfcn.h>
 #include <sched.h>
@@ -152,6 +159,39 @@ Role g_roles[2] = {{"replay+present"}, {"game main"}};
 void thread_counters(uint64_t& cpu_ns, long faults[2], long switches[2]) {
     cpu_ns = thread_cpu_ns();
     thread_usage(faults, switches);
+}
+
+
+// Linux desktop (power-profiles-daemon): under its power-saver profile (and a laptop's "low-power" platform profile)
+// the CPU's energy preference is "power" and the package power limit low; the game's threads, which wake every few
+// milliseconds and sleep again, then run at a fraction of the clock: on the Intel laptop of docs/nvn/studies/
+// intel-60fps-1710.md the same scripted scene ran at 54 fps under power-saver and at 60 under performance. A helper
+// (`powerprofilesctl launch -p performance -- tail --pid=<us> -f /dev/null`, the way GameMode and Steam do it) holds
+// the profile until this process ends; the daemon puts the user's profile back by itself. Nothing happens when
+// powerprofilesctl or the daemon is missing. NX_POWER_PROFILE=0 never asks.
+void request_performance_profile() {
+#if defined(__linux__) && !defined(__ANDROID__)
+    static bool done = false;
+    if (done) return;
+    done = true;
+    const char* e = std::getenv("NX_POWER_PROFILE");
+    if (e && e[0] == '0') return;
+    char pid[32];
+    std::snprintf(pid, sizeof pid, "--pid=%d", int(getpid()));
+    char* argv[] = {const_cast<char*>("powerprofilesctl"), const_cast<char*>("launch"), const_cast<char*>("-p"),
+                    const_cast<char*>("performance"), const_cast<char*>("-r"),
+                    const_cast<char*>("a game is running (nx runtime)"), const_cast<char*>("--"),
+                    const_cast<char*>("tail"), pid, const_cast<char*>("-f"), const_cast<char*>("/dev/null"), nullptr};
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0);
+    posix_spawn_file_actions_addopen(&fa, 1, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", O_WRONLY, 0);
+    pid_t child = 0;
+    int rc = posix_spawnp(&child, "powerprofilesctl", &fa, nullptr, argv, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    log("power: performance profile requested through powerprofilesctl (%s)", rc == 0 ? "started" : "not available");
+#endif
 }
 
 void frame_thread_tick(int role) {

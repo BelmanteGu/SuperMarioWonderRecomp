@@ -23,6 +23,30 @@ NVN implemented over Vulkan (MoltenVK).
 
 ## Log
 
+### 2026-10-17: Linux port, languages, ultrawide, 60 fps on an Intel iGPU, build guide
+
+- **Linux port** (BelmanteGu): `platform_linux.cpp` (SDL3 window, pad, keyboard, audio, Vulkan surface, crash
+  handler), `memguard_linux.cpp`, a CMake branch, `tools/wonder_linux.sh`. On Ubuntu 26.04 the generated C++ and the
+  12,751 SPIR-V modules came out byte for byte the Mac's; the importer gained `--exefs` so no nstool is needed.
+- **Languages** (#4, LokiCode404): `NX_LANGUAGE` / `language.txt` and the `set` service; zh-Hans / zh-Hant fixed
+  after review (all 16 Mals archives checked with `NX_TRACE_FS`).
+- **Ultrawide** (`NX_ULTRAWIDE=1`): render targets widened to the window's shape and the cameras' aspect patched:
+  real Hor+ at 21:9 and 32:9; HUD and menus a centred 16:9 area. [docs/nvn/studies/ultrawide-1710.md](docs/nvn/studies/ultrawide-1710.md).
+- **Above 60 fps:** not by a switch; the simulation steps once per present interval
+  ([fps-unlock-1710.md](docs/nvn/studies/fps-unlock-1710.md)). `NX_FPS_CAP=30` is the clean low-end mode.
+- **Intel UHD (ADL-S GT0.5), the weakest GPU here:** from 26-36 fps with black characters to **60.0 fps at 720p,
+  uncapped, correct picture (14 of 14 windows at 58+, three runs)**. Black characters: unwritten vertex outputs now
+  start at zero. Speed: the CPU replay of a frame went from 12 ms to 5 ms once the performance power profile is held
+  while playing (power-saver throttled the bursty threads); pipelined submits and unpadded buffers on integrated GPUs.
+  Ultrawide 2560x1080 at 720p: 59.0. Docked 1080p stays GPU-bound (~39). [intel-60fps-1710.md](docs/nvn/studies/intel-60fps-1710.md),
+  [summary-1710.md](docs/nvn/studies/summary-1710.md).
+- **Android launcher:** Widescreen, Screen rate (experimental), automatic pipelining, Buffer padding.
+- **Build guide** (#8, from ouni666's community guide): [docs/BUILD.md](docs/BUILD.md) and `tools/extract_shaders.sh`
+  (all 141 shader groups; checked identical to the extraction used for the build).
+- **#5 (Windows crash after character select):** not reproduced on Linux; analysis in DEBUG-2 #93 (a rail whose
+  parameter resource is not found); crash reports now list the last files opened.
+- README pictures and GIF re-shot on Linux with the RTX 3050 in ultrawide.
+
 ### 2026-10-14: Mac performance study; glyph-cache upload fixed; FSR 1
 
 Full write-up and method: [docs/nvn/MAC-PERF.md](docs/nvn/MAC-PERF.md).

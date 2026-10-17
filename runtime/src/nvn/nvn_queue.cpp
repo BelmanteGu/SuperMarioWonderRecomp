@@ -27,6 +27,8 @@
 #include "platform.h"
 
 namespace nx {
+void svc_profile_mark(int role);
+void svc_profile_report(uint64_t frames, int role);
 uint64_t display_period_ns();
 extern std::atomic<uint64_t> g_tick_calls, g_yield_calls, g_sleep_calls;
 }
@@ -304,6 +306,7 @@ uint32_t governor_max(uint64_t now) {
 
 #ifdef __linux__
 // One line per 300 main-thread frames: wall time, CPU seconds used since the last line, % of one core, per thread.
+static std::map<std::string, uint64_t> g_runq_wait, g_runq_prev;
 static void cpu_log_tick() {
     static int n = 0;
     static uint64_t wall0 = 0;
@@ -329,6 +332,14 @@ static void cpu_log_tick() {
             sscanf(rp + 2, "%*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu", &ut, &st);
             cur[name + "/" + e->d_name] = ut + st;
             cur_sys[name + "/" + e->d_name] = st;
+            {  // schedstat: ns on a CPU, ns waiting on a run queue (ready but no CPU free), timeslices
+                snprintf(path, sizeof path, "/proc/self/task/%s/schedstat", e->d_name);
+                if (FILE* sf = fopen(path, "r")) {
+                    unsigned long long run = 0, wait = 0, slices = 0;
+                    if (fscanf(sf, "%llu %llu %llu", &run, &wait, &slices) == 3) g_runq_wait[name + "/" + e->d_name] = wait;
+                    fclose(sf);
+                }
+            }
         }
         closedir(d);
     }
@@ -342,7 +353,8 @@ static void cpu_log_tick() {
         if (dt > 0 && used / dt > 0.03) {
             char b[96];
             double sys = double(cur_sys[k] - (prev_sys.count(k) ? prev_sys[k] : 0)) * tick;
-            snprintf(b, sizeof b, " %s=%.0f%%(sys %.0f)", k.substr(0, k.find('/')).c_str(), 100 * used / dt, 100 * sys / dt);
+            double wq = double(g_runq_wait[k] - g_runq_prev[k]) / 1e9;
+            snprintf(b, sizeof b, " %s=%.0f%%(sys %.0f, runq wait %.0f)", k.substr(0, k.find('/')).c_str(), 100 * used / dt, 100 * sys / dt, 100 * wq / dt);
             line += b;
         }
     }
@@ -353,6 +365,7 @@ static void cpu_log_tick() {
     if (dt > 0) log("cpu: %.1f s wall, process %.0f%% of one core (%.2f cores);%s", dt, 100 * sum / dt, sum / dt, line.c_str());
     prev = cur;
     prev_sys = cur_sys;
+    g_runq_prev = g_runq_wait;
     wall0 = now;
 }
 #else
@@ -369,6 +382,12 @@ void frame_time_probe(CPU& c) {
     if (!m || c.x[30] - m->base != 0xe16ac || !c.x[19]) return;
     plat::perf_hint_thread();  // the game's main thread makes the frame too (ADPF, PLAN.md R2)
     plat::frame_thread_tick(1);
+    {
+        static thread_local bool marked = false;
+        if (!marked) marked = true, svc_profile_mark(1);
+        static uint64_t n = 0;
+        if (++n % 600 == 0) svc_profile_report(600, 1);
+    }
     // NX_FPS_CAP=30 (the launcher's "FPS limit"): the game is held at its own 30 fps mode, interval 2, always. The
     // game's logic steps by the interval it asked for, so the speed stays right; only the governors below are off.
     // 60 or unset: the game's own behaviour (60 when it can, 30 when heavy) plus our governor.
@@ -489,6 +508,12 @@ void QueuePresentTexture(CPU& c) {
     static uint64_t work_from = 0;
     uint64_t t_in = plat::monotonic_ns();
     tl("present>");
+    {
+        static thread_local bool marked = false;
+        if (!marked) marked = true, svc_profile_mark(2);
+        static uint64_t n = 0;
+        if (++n % 600 == 0) svc_profile_report(600, 2);
+    }
     plat::perf_hint_thread();
     if (work_from) plat::perf_hint_frame(int64_t(t_in - work_from));
     if (auto* w = get<Window>(c.x[1])) {

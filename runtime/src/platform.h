@@ -82,6 +82,8 @@ void gpu_turbo();  // NX_GPU_TURBO=1: the Adreno GPU at its highest clock (perf_
 // role 0: the thread that replays and presents (frame_presented ticks it); 1: the game's main thread.
 void frame_thread_tick(int role);
 void frame_presented();  // after each present to the display
+// Linux: asks power-profiles-daemon for its performance profile for as long as this process lives (frame_stats.cpp).
+void request_performance_profile();
 // Write watches (write_watch.cpp; page protection, POSIX): add fails when unsupported or full; take re-arms and
 // says whether the range was written since the last take; the crash handler calls fault first (true: handled).
 bool write_watch_add(uint64_t addr, uint64_t size);

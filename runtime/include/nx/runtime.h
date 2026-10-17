@@ -126,5 +126,8 @@ uint64_t system_tick();
 void add_virtual_file(const std::string& path, std::string data);
 // The contents of a real game file under the data folder ("" if missing).
 std::string read_game_file(const std::string& relative_to_romfs);
+// The last file and directory opens of every thread (a small ring, always on), logged by the crash handlers: what
+// the game was loading when it crashed (hle_fs.cpp).
+void log_recent_files();
 
 }  // namespace nx

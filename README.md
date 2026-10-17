@@ -38,7 +38,7 @@ Part of the [SwitchGamesRecomp](https://github.com/BelmanteGu/SwitchGamesRecomp)
 | macOS (Apple Silicon) | works, the reference platform | Vulkan on Metal through MoltenVK |
 | Windows (x86-64) | works, tested on NVIDIA (RTX 3050) and Intel GPUs | native Vulkan 1.3 |
 | Android (arm64) | works, tested on a Galaxy S23 | native Vulkan 1.3 |
-| Linux (x86-64) | works since 2026-10-17, tested on Ubuntu 26.04 with an NVIDIA RTX 3050 laptop GPU | native Vulkan 1.3 |
+| Linux (x86-64) | works since 2026-10-17, tested on Ubuntu 26.04: NVIDIA RTX 3050 laptop GPU, and **60 fps on an Intel UHD integrated GPU** (720p) | native Vulkan 1.3 |
 
 Linux support was added on 2026-10-17 by [BelmanteGu](https://github.com/BelmanteGu) (Projeto Belmante): the
 platform layer `runtime/src/platform_linux.cpp` (SDL3 window, gamepad, keyboard and audio, Vulkan surface through
@@ -87,10 +87,9 @@ The details are in the GitHub milestones.
 - **Windowed confirmation of the W7 glitch fixes (#43-#45, #47):** horizon band, silhouettes, present mode.
 - **Character-select blur:** needs a reference from a real console.
 - **Android rendering bugs and performance:** hand-off notes in [docs/nvn/android-perf/](docs/nvn/android-perf/).
-- **Intel integrated GPUs: characters and near terrain black (found 2026-10-17, not fixed).** On an Intel UHD (Mesa
-  ANV) the lit shaders read NaN from a low-resolution lighting buffer; the NaN comes from an `Fma` in three
-  character-lighting shaders. NVIDIA is not affected. Cause, evidence and next step in
-  [docs/nvn/studies/summary-1710.md](docs/nvn/studies/summary-1710.md#open-bug-black-silhouettes-on-intel-not-fixed).
+- **Windows: crash after character select (#5):** not reproduced on Linux; the crash is a rail object whose
+  parameter resource was not found (analysis in [docs/nvn/DEBUG-2.md](docs/nvn/DEBUG-2.md), entry #93). Crash
+  reports now end with the last files the game opened, to find the missing one.
 - **Ultrawide:** HUD not anchored to the screen edges, menu backdrops leave side bands, restart after resizing.
 - **Above 60 fps:** the game steps once per frame, so a faster vsync speeds the game up; no real unlock yet.
 - **Linux:** SDL3 was built without Wayland, so the window goes through XWayland on a Wayland desktop.
@@ -108,24 +107,34 @@ Studied, implemented and measured on 2026-10-17 on the Linux port (summary and n
 - **Frame rate:** `NX_FPS_CAP=30` holds the game's own 30 fps mode (flat 30.0 on both GPUs, less CPU). Running
   above 60 is not possible by a switch: the simulation advances once per frame (`NX_DISPLAY_HZ` exists only as an
   experiment and speeds the game up).
-- **Integrated GPUs:** submits are pipelined by default there (`NX_PIPELINED=0` to turn off) and bound buffers are
-  no longer padded where the GPU bound-checks (`NX_PAD_BUFFERS=1` to restore). `tools/wonder_linux.sh intel` and
-  `lightest` are the presets for them.
+- **Integrated GPUs: a steady 60 fps on an Intel UHD (ADL-S GT0.5) at 720p, with a correct picture.**
+  - The black characters and terrain on Intel (Mesa ANV) came from vertex-shader outputs the game leaves unwritten
+    on some paths: Maxwell reads them as zero, ANV as garbage (NaN in the lighting). They now start at zero
+    (`NX_ZERO_VS_OUTPUTS=0` turns it off; not on Apple).
+  - On Linux the runtime holds power-profiles-daemon's *performance* profile while the game runs on an integrated
+    GPU (as GameMode does; the user's profile comes back afterwards; `NX_POWER_PROFILE=0` never asks, `=1` asks on
+    any GPU). Under the power-saver profile the CPU replay of a frame took 12 ms; under performance, 5 ms.
+  - Submits are pipelined by default on integrated GPUs (`NX_PIPELINED=0` to turn off) and bound buffers are no
+    longer padded where the GPU bound-checks (`NX_PAD_BUFFERS=1` to restore).
+  - `tools/wonder_linux.sh intel` (720p, pipelined, performance profile, no fps cap) and `lightest` (+ FSR).
+  - Docked 1080p stays GPU-bound on that iGPU (about 39 fps). Details: [docs/nvn/studies/intel-60fps-1710.md](docs/nvn/studies/intel-60fps-1710.md).
 
-Flower Kingdom intro, unattended runs (frames produced per second; Intel UHD ADL-S GT0.5 and RTX 3050 Laptop, same
-machine):
+Flower Kingdom intro, unattended runs, uncapped (median fps in gameplay; Intel UHD ADL-S GT0.5 and RTX 3050 Laptop,
+same machine):
 
 | Configuration | Intel | RTX 3050 |
 |---|---|---|
-| before (docked 1080p) | 26.4 | 29.5 |
-| now, defaults (docked 1080p) | 31.3 | 30.5 |
-| handheld 720p, pipelined | 41.4 | 53.2 |
-| preset `intel` (720p, pipelined, 30 fps cap) | 30.0 flat | 30.0 flat |
-| ultrawide 2560x1080, 720p, pipelined | 35.4 | 52.8 |
+| before the 2026-10-17 work (docked 1080p) | 26.4 (picture wrong) | 29.5 |
+| handheld 720p before | 35.9 (picture wrong) | - |
+| **now: handheld 720p, defaults** | **60.0** (14 of 14 windows at 58+, picture right) | 53.2 |
+| now: docked 1080p | 38.9 | 30.5 |
+| `NX_FPS_CAP=30` | 30.0 flat | 30.0 flat |
+| ultrawide 2560x1080, handheld 720p | **59.0** (14 of 14 windows at 58+) | 52.8 |
 
-The Intel game numbers were taken with the black-silhouette bug above (the picture is wrong in gameplay on Intel):
+Before the fix (top: Intel, characters and terrain black; bottom: RTX), and after it on the Intel:
 
-![Intel vs RTX](docs/media/wonder/44-intel-silhouettes-vs-rtx.jpg)
+![Intel vs RTX before the fix](docs/media/wonder/44-intel-silhouettes-vs-rtx.jpg)
+![Intel after the fix](docs/media/wonder/45-intel-fixed-60fps.jpg)
 
 ### Windows
 
@@ -136,6 +145,9 @@ the PC quality work in [docs/nvn/pc-quality/](docs/nvn/pc-quality/). `dev.ps1` s
 the PC. The recompile, shader and build steps are the same as in the macOS section below.
 
 ### Linux
+
+The complete step-by-step guide (Linux, macOS, Windows, Android, with the expected checks and troubleshooting) is
+[docs/BUILD.md](docs/BUILD.md), based on the community guide by ouni666 (#8).
 
 Wonder runs on Linux x86-64 with a Vulkan 1.3 GPU (tested on Ubuntu 26.04, NVIDIA RTX 3050 laptop GPU, driver 595).
 Nothing needs root: every tool can live under `private/third_party/`.
@@ -264,6 +276,8 @@ Useful switches:
 | `NX_FPS_CAP=30` | the game's own 30 fps mode, always (steady, lighter) |
 | `NX_PAD_BUFFERS=1` | pads bound buffers again (if HUD text or characters glitch on a GPU) |
 | `NX_DISPLAY_HZ=<hz>` | experimental: vsync at another rate; the game runs faster or slower, not smoother |
+| `NX_ZERO_VS_OUTPUTS=0` | keeps unwritten vertex outputs undefined (the fix for black characters on Intel is on by default, not on Apple) |
+| `NX_POWER_PROFILE=0/1` | Linux: never / always hold the performance power profile while playing (default: on integrated GPUs) |
 
 Every debug switch (draw traces, snapshots, bisecting toggles) is listed in [docs/nvn/SWITCHES.md](docs/nvn/SWITCHES.md).
 
@@ -302,6 +316,8 @@ Ground rules for this track:
 ## Credits
 
 - **Linux port** - [BelmanteGu](https://github.com/BelmanteGu) (Projeto Belmante), 2026-10-17.
+- **Build guide** (`docs/BUILD.md`) - based on the community guide by [ouni666](https://github.com/ouni666),
+  [#8](https://github.com/BelmanteGu/SuperMarioWonderRecomp/issues/8).
 - **Language selection** (`NX_LANGUAGE`, the `set` service, `Language.bat`) - [LokiCode404](https://github.com/LokiCode404),
   [PR #4](https://github.com/BelmanteGu/SuperMarioWonderRecomp/pull/4).
 - **Ryujinx** shader translator (MIT) - used offline to translate the Maxwell shaders to SPIR-V; also a reference for

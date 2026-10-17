@@ -441,6 +441,7 @@ LONG WINAPI crash_handler(EXCEPTION_POINTERS* e) {
             host_where(uint64_t(r->ExceptionAddress)).c_str(), (unsigned long long)info);
     host_backtrace(*e->ContextRecord);
     dump_guest(nx::current_cpu());
+    nx::log_recent_files();
     return EXCEPTION_EXECUTE_HANDLER;
 }
 

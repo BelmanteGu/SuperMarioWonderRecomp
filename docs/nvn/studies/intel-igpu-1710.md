@@ -1,5 +1,9 @@
 # Intel iGPU study (2026-10-17)
 
+**Superseded in two points by `intel-60fps-1710.md`:** the black silhouettes are fixed (vertex outputs left unwritten, zero-initialized now), and the
+fps ceiling seen here (30/38-41, replay 12 ms) was the CPU running at its power-saver clock, not the code: with the performance power profile the
+same scene holds 60 fps. The measurements below are kept as they were taken.
+
 Machine: i5-12450HX (4P+4E), Intel UHD Graphics (ADL-S GT0.5, Mesa 26.0.8 ANV), shared RAM. Everything below ran headless
 (`NX_HEADLESS=1`, `NX_GPU=integrated`), scene = Flower Kingdom intro after the scripted input in
 `private/.../study/script_a.txt` (A every 3 s). "Measured" = log lines `nvn/vk: per frame over 60`, median of the last 12 windows;

@@ -6,7 +6,7 @@ Three studies run on the Linux port, then merged and measured together. The deta
 |---|---|---|
 | Ultrawide (21:9, 32:9) | [ultrawide-1710.md](ultrawide-1710.md) | **works** behind `NX_ULTRAWIDE=1`: real Hor+ (more of the level, not stretched) |
 | Frame rate above 60 | [fps-unlock-1710.md](fps-unlock-1710.md) | **not by a switch**: the game steps once per frame; `NX_FPS_CAP=30` is the clean low-end mode |
-| Integrated Intel GPU | [intel-igpu-1710.md](intel-igpu-1710.md) | pipelined submits by default on integrated GPUs (+19% docked), lighter uploads; **open bug: black silhouettes on Intel** |
+| Integrated Intel GPU | [intel-igpu-1710.md](intel-igpu-1710.md), then [intel-60fps-1710.md](intel-60fps-1710.md) | **60 fps at 720p with a correct picture** (black silhouettes fixed; performance power profile; pipelined submits) |
 
 Every number below comes from unattended runs (`NX_HEADLESS=1`: frames are rendered and dumped, nothing is
 presented, so they measure frame production, not a display), on one machine: Ubuntu 26.04, Intel Core (Alder Lake,
@@ -59,7 +59,11 @@ measured time (`sead::GameFramework::procFrame_`, fps-unlock-1710.md). A faster 
 and the music fall out of step. The ways to a real 120 are a fractional simulation step (days of reverse engineering,
 risky for physics) or frame generation in the present pass (weeks, needs optical flow on the GPU). Neither is done.
 
-## Open bug: black silhouettes on Intel (not fixed)
+## Black silhouettes on Intel: fixed the same day
+
+**Update (later on 2026-10-17):** fixed and the Intel reaches 60 fps at 720p, see [intel-60fps-1710.md](intel-60fps-1710.md).
+The cause was not an `Fma` but vertex-shader outputs the game leaves unwritten on some paths (Maxwell reads zero,
+Mesa ANV garbage); they now start at zero (`NX_ZERO_VS_OUTPUTS`). The analysis below is what led there.
 
 ![Intel vs RTX](../../media/wonder/44-intel-silhouettes-vs-rtx.jpg)
 

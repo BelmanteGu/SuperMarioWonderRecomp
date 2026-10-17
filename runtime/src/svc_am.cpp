@@ -59,6 +59,9 @@ std::shared_ptr<Service> common_state_getter() {
         s.cmds[5] = [](IpcCtx& c) { c.push<uint8_t>(handheld ? 0 : 1); return 0u; };   // GetOperationMode
         s.cmds[6] = [](IpcCtx& c) { c.push<uint32_t>(handheld ? 0 : 1); return 0u; };  // GetPerformanceMode
         s.cmds[9] = [](IpcCtx& c) { c.push<uint8_t>(1); return 0u; };   // GetCurrentFocusState: in focus
+        // SetCpuBoostMode(CpuBoostMode): Wonder asks for the boost around every load. A PC has no clock to raise, so
+        // the request is taken and dropped (no output). Same answer as the generic stub, without its log line.
+        s.cmds[66] = [](IpcCtx&) { return 0u; };
         // NX_RENDER_RES=<w>x<h>: the size the game renders at, while it stays docked (a resolution scale: the game sizes
         // its window textures and targets from this answer; the present step stretches the picture to the window).
         static const std::pair<uint32_t, uint32_t> res = [] {

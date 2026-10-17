@@ -3,6 +3,7 @@
 //   save:  -> private/user/save/<mount>
 //   cache: -> private/user/cache<index>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -31,6 +32,25 @@ namespace {
 bool trace_fs() {
     static const bool on = g_trace || std::getenv("NX_TRACE_FS") != nullptr;
     return on;
+}
+
+// The last opens, newest last: a crash report that says what was being loaded (log_recent_files, read by the crash
+// handlers; try_lock there, a handler must not wait for a thread that holds the lock).
+constexpr size_t kRecentOps = 24;
+std::mutex g_recent_lock;
+struct RecentOp {
+    int64_t thread = 0;
+    uint64_t seq = 0;
+    char text[200] = {0};
+} g_recent[kRecentOps];
+uint64_t g_recent_seq = 0;
+
+void note_open(const char* what, const std::string& guest_path, const char* result) {
+    std::lock_guard lk(g_recent_lock);
+    RecentOp& r = g_recent[g_recent_seq % kRecentOps];
+    r.thread = plat::current_thread_id();
+    r.seq = ++g_recent_seq;
+    std::snprintf(r.text, sizeof r.text, "%s %s: %s", what, guest_path.c_str(), result);
 }
 
 constexpr uint32_t kOk = 0;
@@ -218,24 +238,29 @@ void OpenFile(CPU& c) {  // (FileHandle* out, path, int mode: 1 read, 2 write, 4
         uint64_t h = g_next++;
         g_files[h] = std::make_shared<File>(f, guest);
         st<uint64_t>(c.x[0], h);
+        note_open("OpenFile", guest, "virtual");
         if (trace_fs()) log("fs: OpenFile(%s) -> virtual, %zu bytes", guest.c_str(), v->size());
         c.x[0] = kOk;
         return;
     }
     std::error_code ec;
     if (p.empty() || !fs::is_regular_file(p, ec)) {
+        note_open("OpenFile", guest, p.empty() ? "unknown mount" : "not found");
         if (trace_fs()) log("fs: OpenFile(%s) not found", guest.c_str());
         c.x[0] = kPathNotFound;
         return;
     }
     FILE* f = plat::fopen_utf8(utf8(p), (mode & 2) ? "r+b" : "rb");
     if (!f) {
+        note_open("OpenFile", guest, "the host could not open it");
+        if (trace_fs()) log("fs: OpenFile(%s) failed to open on the host (errno %d)", guest.c_str(), errno);
         c.x[0] = kPathNotFound;
         return;
     }
     uint64_t h = g_next++;
     g_files[h] = std::make_shared<File>(f, guest);
     st<uint64_t>(c.x[0], h);
+    note_open("OpenFile", guest, "ok");
     if (trace_fs()) log("fs: OpenFile(%s, %d) -> %llu", guest.c_str(), mode, (unsigned long long)h);
     c.x[0] = kOk;
 }
@@ -334,7 +359,10 @@ void OpenDirectory(CPU& c) {  // (DirectoryHandle* out, path, int mode: 1 dirs, 
     fs::path p = resolve(cstr(c.x[1]));
     int mode = int(c.x[2]);
     std::error_code ec;
-    if (p.empty() || !fs::is_directory(p, ec)) {
+    bool found = !p.empty() && fs::is_directory(p, ec);
+    note_open("OpenDirectory", cstr(c.x[1]), found ? "ok" : "not found");
+    if (trace_fs()) log("fs: OpenDirectory(%s, %d)%s", cstr(c.x[1]).c_str(), mode, found ? "" : " not found");
+    if (!found) {
         c.x[0] = kPathNotFound;
         return;
     }
@@ -474,6 +502,16 @@ NX_HLE("_ZN2nn2fs8ReadFileEPmNS0_10FileHandleElPvmRKNS0_10ReadOptionE", ReadFile
 NX_HLE("_ZN2nn2fs18IsSaveDataExistingERKNS_7account3UidE", IsSaveDataExisting);
 NX_HLE("_ZN2nn2fs11SetFileSizeENS0_10FileHandleEl", SetFileSize);
 NX_HLE("_ZN2nn2fs26DeleteDirectoryRecursivelyEPKc", DeleteDirectoryRecursively);
+
+void log_recent_files() {
+    std::unique_lock lk(g_recent_lock, std::try_to_lock);
+    if (!lk.owns_lock()) return;
+    log("  last file opens (newest last; thread = host thread id):");
+    for (uint64_t k = 0; k < kRecentOps; k++) {
+        const RecentOp& r = g_recent[(g_recent_seq + k) % kRecentOps];
+        if (r.seq) log("    #%llu thread %lld  %s", (unsigned long long)r.seq, (long long)r.thread, r.text);
+    }
+}
 
 void add_virtual_file(const std::string& path, std::string data) {
     std::lock_guard lk(g_fs);
