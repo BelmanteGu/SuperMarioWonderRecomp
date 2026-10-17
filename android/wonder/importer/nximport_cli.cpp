@@ -1,5 +1,5 @@
 // PC test harness of the on-device importer: the same code the APK runs, fed with files from the command line.
-//   nximport --out <data folder> [--title 010015100B514000] [--verify] <prod.keys> [title.keys] <x.nsp|x.xci> ...
+//   nximport --out <data folder> [--title 010015100B514000] [--verify] [--exefs] <prod.keys> [title.keys] <x.nsp|x.xci> ...
 // Prints progress and log lines (never key values).
 #include <fcntl.h>
 #include <unistd.h>
@@ -23,6 +23,8 @@ int main(int argc, char** argv) {
             opt.out_dir = argv[++i];
         } else if (a == "--title" && i + 1 < argc) {
             opt.title_id = strtoull(argv[++i], nullptr, 16);
+        } else if (a == "--exefs") {
+            opt.keep_exefs = true;
         } else if (a == "--verify") {
             opt.verify_only = true;
         } else {
@@ -36,7 +38,7 @@ int main(int argc, char** argv) {
         }
     }
     if (opt.out_dir.empty()) {
-        fprintf(stderr, "usage: nximport --out <dir> [--title <id>] [--verify] <prod.keys> [title.keys] <nsp|xci>...\n");
+        fprintf(stderr, "usage: nximport --out <dir> [--title <id>] [--verify] [--exefs] <prod.keys> [title.keys] <nsp|xci>...\n");
         return 2;
     }
     auto t0 = std::chrono::steady_clock::now();

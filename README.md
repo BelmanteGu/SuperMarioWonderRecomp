@@ -38,14 +38,12 @@ Part of the [SwitchGamesRecomp](https://github.com/BelmanteGu/SwitchGamesRecomp)
 | macOS (Apple Silicon) | works, the reference platform | Vulkan on Metal through MoltenVK |
 | Windows (x86-64) | works, tested on NVIDIA (RTX 3050) and Intel GPUs | native Vulkan 1.3 |
 | Android (arm64) | works, tested on a Galaxy S23 | native Vulkan 1.3 |
-| Linux | **not ported yet, but close** | native Vulkan 1.3 |
+| Linux (x86-64) | works since 2026-10-17, tested on Ubuntu 26.04 with an NVIDIA RTX 3050 laptop GPU | native Vulkan 1.3 |
 
-Linux is not a rewrite. The recompiled game code is portable C++ and the NVN layer talks only generic Vulkan, with
-no Metal code. What is missing is the same small platform layer macOS, Windows and Android already have: a
-`platform_linux.cpp` (window, input, audio) and a `memguard_linux.cpp` next to the existing `platform_mac.cpp` /
-`platform_win.cpp` / `memguard_*.cpp` in `runtime/src/`, plus a Linux branch in `CMakeLists.txt` (today its
-non-Apple, non-Android branch is the Windows one). Nobody has built or run it on Linux yet. Pull requests are
-welcome.
+Linux support was added on 2026-10-17 by [BelmanteGu](https://github.com/BelmanteGu) (Projeto Belmante): the
+platform layer `runtime/src/platform_linux.cpp` (SDL3 window, gamepad, keyboard and audio, Vulkan surface through
+SDL, crash handler) and `memguard_linux.cpp`, a Linux branch in `CMakeLists.txt` and `tools/wonder_linux.sh`. The
+recompiled code and the translated shaders built on Linux are byte for byte the Mac's. See [Linux](#linux).
 
 ## State
 
@@ -82,7 +80,8 @@ The details are in the GitHub milestones.
 - **Windowed confirmation of the W7 glitch fixes (#43-#45, #47):** horizon band, silhouettes, present mode.
 - **Character-select blur:** needs a reference from a real console.
 - **Android rendering bugs and performance:** hand-off notes in [docs/nvn/android-perf/](docs/nvn/android-perf/).
-- **Linux:** see [Platforms](#platforms).
+- **Linux:** gameplay speed not measured yet with a window; SDL3 was built without Wayland, so the window goes
+  through XWayland on a Wayland desktop.
 
 ### Windows
 
@@ -91,6 +90,34 @@ described in [docs/nvn/WINDOWS-PORT.md](docs/nvn/WINDOWS-PORT.md) and [WINDOWS-P
 the PC quality work in [docs/nvn/pc-quality/](docs/nvn/pc-quality/). `dev.ps1` sets up the build environment
 (Visual Studio Build Tools, clang, CMake, Ninja, Vulkan SDK) and `tools/pack_pc_wonder.py` packs your own data for
 the PC. The recompile, shader and build steps are the same as in the macOS section below.
+
+### Linux
+
+Wonder runs on Linux x86-64 with a Vulkan 1.3 GPU (tested on Ubuntu 26.04, NVIDIA RTX 3050 laptop GPU, driver 595).
+Nothing needs root: every tool can live under `private/third_party/`.
+
+Requirements: clang, CMake, Ninja, the Vulkan loader, SDL 3 (the distribution's, or built from source with
+`-DCMAKE_INSTALL_PREFIX=private/third_party/sdl3`), the Vulkan headers 1.4.357 (`runtime/src/vk_gen.h` was
+generated from them; older distribution headers miss some types), .NET SDK 10 (tarball) and a Python 3 venv with
+`capstone lz4 zstandard fonttools`.
+
+1. **Import** the XCI with the on-device importer built for the host; `--exefs` also keeps the raw NSOs the
+   recompiler reads:
+   ```sh
+   cmake -S android/wonder/importer -B private/build/importer -G Ninja && ninja -C private/build/importer
+   private/build/importer/nximport --exefs --out private/wonder prod.keys title.keys MarioWonder.xci
+   ```
+2. **Recompile** and **translate the shaders** as in the macOS section (steps 2 and 3).
+3. **Button font:** `cp android/wonder/assets/fonts/shared_5.ttf private/wonder/fonts/`.
+4. **Build:**
+   ```sh
+   T=$PWD/private/third_party
+   CC=clang CXX=clang++ cmake -S . -B private/wonder/build -G Ninja -DNX_GAME=wonder -DCMAKE_BUILD_TYPE=Release \
+       -DCMAKE_PREFIX_PATH=$T/sdl3 -DNX_VULKAN_INCLUDE=$T/Vulkan-Headers-1.4.357/include
+   ninja -C private/wonder/build -j6 wonder
+   ```
+5. **Run:** `tools/wonder_linux.sh [quality|balanced|performance]` (uses the discrete GPU; F11 or Alt+Enter for
+   full screen).
 
 ### Android
 
@@ -213,7 +240,7 @@ Ground rules for this track:
 | Path | What |
 |---|---|
 | `recomp/` | the AArch64 → C++ recompiler (Python) |
-| `runtime/` | shared runtime: kernel, IPC, `nn::*` HLE, memory, platform layers (Windows, macOS, Android) |
+| `runtime/` | shared runtime: kernel, IPC, `nn::*` HLE, memory, platform layers (Windows, macOS, Linux, Android) |
 | `runtime/src/nvn/` | NVN over Vulkan (Wonder) |
 | `games/<game>/` | per-game glue (entry, patches, mods) |
 | `tools/` | extraction, shader and font tools, packaging |
@@ -222,6 +249,9 @@ Ground rules for this track:
 
 ## Credits
 
+- **Linux port** - [BelmanteGu](https://github.com/BelmanteGu) (Projeto Belmante), 2026-10-17.
+- **Language selection** (`NX_LANGUAGE`, the `set` service, `Language.bat`) - [LokiCode404](https://github.com/LokiCode404),
+  [PR #4](https://github.com/BelmanteGu/SuperMarioWonderRecomp/pull/4).
 - **Ryujinx** shader translator (MIT) - used offline to translate the Maxwell shaders to SPIR-V; also a reference for
   the Switch GPU. Ryujinx and yuzu were studied as references only; no GPL code is used.
 - **Hephaistos** by Nicolas Busseneau (MIT, copy of the license in

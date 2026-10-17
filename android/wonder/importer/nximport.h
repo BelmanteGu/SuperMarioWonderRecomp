@@ -31,6 +31,7 @@ struct Options {
     std::string out_dir;
     uint64_t title_id = 0;  // the application (base) title; 0: the only one found
     bool verify_only = false;  // re-read the outputs and compare with the CRC index
+    bool keep_exefs = false;   // also write the raw NSOs to <out>/exefs/ (the input of python -m recomp)
     std::atomic<bool>* cancel = nullptr;
     std::function<void(const Progress&)> on_progress;  // throttled by the caller if needed
     std::function<void(const std::string&)> on_log;
