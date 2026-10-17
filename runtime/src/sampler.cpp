@@ -1,6 +1,8 @@
 // NX_SAMPLE=<hz> (default 997): a SIGPROF sampling profiler for hunting CPU cost where `perf` is not allowed
 // (kernel.perf_event_paranoid). Every sample is the interrupted thread and its program counter; every 20 s the top
 // buckets per thread are logged as `module+0xoffset` (resolve with `addr2line -f -e <module> 0x...`).
+// Linux x86-64 hosts only (glibc backtrace, REG_RIP): an empty file on Android, macOS and Windows.
+#if defined(__linux__) && defined(__x86_64__) && !defined(__ANDROID__)
 #include <dlfcn.h>
 #include <execinfo.h>
 #include <signal.h>
@@ -137,3 +139,5 @@ struct Init {
 } g_init;
 
 }  // namespace
+
+#endif  // Linux x86-64
