@@ -150,7 +150,24 @@ uint64_t scratch(CPU&, size_t size) {
     return page;
 }
 
+uint64_t real_proc_slow(CPU& c, const char* name);
+
 uint64_t real_proc(CPU& c, const char* name) {
+    // The hot callers (state-object getters, one per bound state) pass string literals: a per-thread cache by the
+    // literal's address, verified by content, instead of a global mutex and a string-keyed tree at every call (the
+    // game's recording threads contended on that lock).
+    struct Hit {
+        std::string name;
+        uint64_t proc = 0;
+    };
+    thread_local std::unordered_map<const char*, Hit> fast;
+    if (auto it = fast.find(name); it != fast.end() && it->second.name == name) return it->second.proc;
+    uint64_t found = real_proc_slow(c, name);
+    if (found) fast[name] = {name, found};
+    return found;
+}
+
+uint64_t real_proc_slow(CPU& c, const char* name) {
     static std::mutex lock;
     static std::map<std::string, uint64_t> cache;
     {
