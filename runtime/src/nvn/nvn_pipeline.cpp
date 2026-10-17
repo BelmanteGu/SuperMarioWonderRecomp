@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 #include <cstdio>
 #include <map>
 #include <set>
@@ -59,6 +63,14 @@ VkImageViewType view_type(const ImageShape& s) {  // SPIR-V Dim: 0 1D, 1 2D, 2 3
 
 namespace {
 
+int process_id() {
+#ifdef _WIN32
+    return _getpid();
+#else
+    return getpid();
+#endif
+}
+
 VkShaderStageFlags stage_bit(ShaderStage s) {
     return s == ShaderStage::Vertex     ? VK_SHADER_STAGE_VERTEX_BIT
            : s == ShaderStage::Fragment ? VK_SHADER_STAGE_FRAGMENT_BIT
@@ -87,7 +99,7 @@ VkShaderModule module_of(const ShaderInfo* s, const uint8_t* kinds = nullptr, ui
         if (s->stage == ShaderStage::Vertex) clip_z_module(s, code);  // NX_CLIP_Z_PATCH (nvn_spirv_clip.cpp)
         if (const char* opt = std::getenv("NX_SPIRV_OPT"); opt || std::getenv("NX_SPIRV_TOOL")) {  // diagnostic: each module through `spirv-opt <flags>` (NX_SPIRV_OPT) or `<tool> in out` (NX_SPIRV_TOOL) first
             static int n = 0;
-            std::string in = "/tmp/nx_spv_" + std::to_string(getpid()) + "_" + std::to_string(n++) + ".spv", out = in + ".out";
+            std::string in = "/tmp/nx_spv_" + std::to_string(process_id()) + "_" + std::to_string(n++) + ".spv", out = in + ".out";
             if (FILE* f = std::fopen(in.c_str(), "wb")) {
                 std::fwrite(code.data(), 4, code.size(), f);
                 std::fclose(f);

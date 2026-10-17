@@ -25,11 +25,17 @@ from pack_phone_wonder import entries  # noqa: E402  (analysis, romfs, spirv, fo
 
 
 def pc_entries(root):
-    for f in ("main", "sdk", "main.npdm"):
+    for f in ("main", "sdk"):
         p = os.path.join(root, "exefs", f)
         if not os.path.isfile(p):
             sys.exit(f"missing {p}")
         yield p, "exefs/" + f
+    npdm = os.path.join(root, "exefs", "main.npdm")
+    if not os.path.isfile(npdm):
+        npdm = os.path.join(root, "analysis", "main.npdm")
+    if not os.path.isfile(npdm):
+        sys.exit(f"missing {root}/exefs/main.npdm and {root}/analysis/main.npdm")
+    yield npdm, "exefs/main.npdm"
     yield from entries(root)
 
 
