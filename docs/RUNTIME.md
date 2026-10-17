@@ -50,14 +50,16 @@ Guest pointers are host pointers. Fixed ranges are reserved at startup and commi
 |---|---|---|
 | `0x40_0000_0000` | `0x3_0000_0000` | modules (`NX_BASE`; `sdk` at +0x1000_0000) |
 | `0x50_0000_0000` | `0x4_0000_0000` | heap (svcSetHeapSize), up to 6 GiB |
-| `0x58_0000_0000` | `0x6_0000_0000` | alias region (svcMapMemory destinations): 64 GiB / 16 GiB |
-| `0x68_0000_0000` | `0xA_0000_0000` | stack region |
-| `0x6A_0000_0000` | `0xB_0000_0000` | kernel allocations: TLS pages, main stack, shared memory |
+| `0x58_0000_0000` | probed (`0x3_2000_0000` gap or `0x5_8000_0000` after heap) | alias region (svcMapMemory destinations); base/size from `svcGetInfo` |
+| `0x68_0000_0000` | `0xC_7000_0000` (probed) | stack region |
+| `0x6A_0000_0000` | `0xD_7000_0000` (probed) | kernel allocations: TLS pages, main stack, shared memory |
 | `0x6F_0000_0000` | `0xE_0000_0000` | HLE thunk addresses (never mapped; `nx::call` dispatches them) |
 
-macOS on Apple silicon refuses fixed mappings between `0x10_0000_0000` and `0x6F_FFFF_FFFF` (measured on macOS
-14.3: `mmap(MAP_FIXED)` returns ENOMEM there; `0x2_0000_0000..0xF_FFFF_FFFF` and `0x70_0000_0000` up are free), and
-the dyld shared cache (every system framework, loaded with SDL3) sits at `0x1_8000_0000` up to `0x3_0000_0000`.
+macOS on Apple silicon often ignores `mmap` address hints in `0x57_0000_0000..0xC6_FFFF_FFFF` (maps land near
+`0x70_0000_0000` instead); the runtime probes alias/stack/kernel, munmaps wrong-hint mappings, and falls back to
+`MAP_FIXED` where needed. macOS 26+ also blocks some VAs around `0x6_0000_0000`. Measured on macOS 14.3,
+`MAP_FIXED` fails in `0x10_0000_0000..0x6F_FFFF_FFFF`. The dyld shared cache (every system framework, loaded with
+SDL3) sits at `0x1_8000_0000` up to `0x3_0000_0000`.
 The macOS layout stays below 2^36, inside Horizon's 39-bit application address space. The recompiler emits each
 module's `NXB` as `NX_BASE + offset` (`--base` is measured in the reference layout), so the same generated code
 builds for every host. Apple silicon pages are 16 KiB: commits round out to them.

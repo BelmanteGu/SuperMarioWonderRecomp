@@ -449,7 +449,7 @@ static void svc_impl(CPU& c, uint32_t imm, uint64_t pc) {
             uint64_t dst = c.x[0], src = c.x[1], size = c.x[2];
             commit(dst, size);
             std::memcpy(reinterpret_cast<void*>(dst), reinterpret_cast<void*>(src), size);
-            vm_set(dst, size, dst - kStackBase < kStackSize ? kMemStack : kMemAlias, 3);
+            vm_set(dst, size, dst - stack_base() < kStackSize ? kMemStack : kMemAlias, 3);
             break;
         }
         case 0x05: {  // UnmapMemory(dst, src, size)
@@ -652,7 +652,7 @@ static void svc_impl(CPU& c, uint32_t imm, uint64_t pc) {
             break;
         case 0x2D:  // UnmapPhysicalMemory
             decommit(c.x[0], c.x[1]);
-            vm_set(c.x[0], c.x[1], c.x[0] - kAliasBase < kAliasSize ? kMemFree : kMemInaccessible, 0);
+            vm_set(c.x[0], c.x[1], c.x[0] - alias_base() < alias_size() ? kMemFree : kMemInaccessible, 0);
             break;
         case 0x34:
             rc = svc_wait_for_address(c.x[0], uint32_t(c.x[1]), int32_t(c.x[2]), int64_t(c.x[3]));
