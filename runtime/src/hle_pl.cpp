@@ -60,6 +60,12 @@ const Font& font(uint32_t type) {
     // Arial Unicode (Office installs it) covers the most; else Arial, as on the Mac.
     candidates.push_back("C:/Windows/Fonts/arialuni.ttf");
     candidates.push_back("C:/Windows/Fonts/arial.ttf");
+#elif defined(__linux__)
+    // Liberation Sans has Arial's metrics; else the common distribution fonts.
+    candidates.push_back("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf");
+    candidates.push_back("/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf");
+    candidates.push_back("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf");
+    candidates.push_back("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
 #endif
     std::vector<uint8_t> ttf;
     for (const auto& path : candidates) {
